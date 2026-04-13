@@ -1,6 +1,6 @@
 # Project SWT
 
-*Project Software Team*. A hybrid development agent team for professional Jira-based software work. TPM orchestrates SWE and QA subagents to collaboratively develop features, find edge cases, verify code quality, and write Playwright tests.
+A multi-agent development team you deploy from any repo to collaboratively work on Jira tickets. Spring 2026.
 
 ## Quick Start
 

@@ -72,12 +72,20 @@ For each file that was changed:
    - **Side effects** — could this change break something else?
    - **.NET config safety** — did the SWE modify `appsettings.json` connection strings/secrets, `launchSettings.json` env values, `.csproj`, or `.sln` files? If so, flag it immediately.
 
+### 2.5. Verify SWE Regression Scan
+
+SWEs include regression scan results in their reports (tests that reference modified code, potential risks). Cross-reference these:
+- If SWE flagged specific test files as affected, read those tests and verify they're still valid after the changes
+- If SWE flagged risks, include your assessment of those risks in your report
+- If SWE didn't include a regression scan, run one yourself: grep test directories for references to the modified classes/methods
+
 ### 3. Run Tests
 
 If the project has a test suite:
 1. Identify how to run tests (look for package.json scripts, Makefile, test directories)
 2. Run the test suite
-3. Report any failures, including whether they're pre-existing or introduced by the changes
+3. Pay special attention to any tests flagged by the SWE regression scan
+4. Report any failures, including whether they're pre-existing or introduced by the changes
 
 ### 4. Report Findings
 
