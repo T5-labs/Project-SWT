@@ -8,8 +8,10 @@
 #   swt --CMMS-5412          → constrained mode (manually specify Jira ticket)
 #
 # Install:
-#   Add this script's directory to your PATH, or symlink it:
-#   ln -s /path/to/Project-SWT/deploy.sh /usr/local/bin/swt
+#   See README.md for full setup. Quick version:
+#   1. Create ~/bin/swt with: exec ~/Project-SWT/deploy.sh "$@"
+#   2. chmod +x ~/bin/swt
+#   3. For PowerShell: create ~/bin/swt.ps1 (see README)
 
 set -e
 
@@ -54,7 +56,7 @@ for arg in "$@"; do
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo ""
-            echo "Run from inside your work repo (Git Bash only)."
+            echo "Run from inside your work repo (Git Bash or PowerShell)."
             echo "Project-SWT: $SWT_DIR"
             exit 0
             ;;

@@ -13,18 +13,43 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 
 ## Setup
 
-1. Add `deploy.sh` to your PATH:
-   ```bash
-   # Option A: symlink
-   ln -s /path/to/Project-SWT/deploy.sh /usr/local/bin/swt
+### Prerequisites
 
-   # Option B: add to PATH in .bashrc/.zshrc
-   export PATH="$PATH:/path/to/Project-SWT"
+- [Claude Code CLI](https://claude.ai/code) installed and authenticated
+- Git Bash (comes with [Git for Windows](https://git-scm.com/download/win))
+- A `~/bin` directory on your PATH (create with `mkdir -p ~/bin`)
+
+### Install
+
+1. Clone the repo:
+   ```bash
+   git clone https://github.com/T5-labs/Project-SWT.git ~/Project-SWT
    ```
 
-2. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian`)
+2. Create the launcher scripts in `~/bin`:
 
-3. Ensure `claude` CLI is installed and authenticated
+   **Git Bash** (`~/bin/swt`):
+   ```bash
+   #!/bin/bash
+   exec ~/Project-SWT/deploy.sh "$@"
+   ```
+   ```bash
+   chmod +x ~/bin/swt
+   ```
+
+   **PowerShell** (`~/bin/swt.ps1`):
+   ```powershell
+   # Adjust the Git Bash path if yours differs
+   & "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe" "$HOME\Project-SWT\deploy.sh" @args
+   ```
+
+3. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian`)
+
+### Verify
+
+```bash
+swt --help
+```
 
 ## Team
 
