@@ -43,6 +43,16 @@ MODE="unconstrained"
 TICKET_COUNT=0
 for arg in "$@"; do
     case "$arg" in
+        --help|-h)
+            echo "Usage: swt [--PROJECT-NUMBER]"
+            echo ""
+            echo "  swt                    Unconstrained mode (ad-hoc tasks)"
+            echo "  swt --CMMS-5412        Constrained mode (scoped to Jira ticket)"
+            echo ""
+            echo "Run from inside your work repo (Git Bash only)."
+            echo "Project-SWT: $SWT_DIR"
+            exit 0
+            ;;
         --*)
             # Parse --PROJECT-NUMBER (e.g., --CMMS-5412)
             TICKET="${arg#--}"
@@ -110,6 +120,6 @@ fi
 
 echo ""
 
-# Launch claude with Project-SWT as the project directory (for CLAUDE.md)
-# but working in the user's repo directory
-exec claude --dangerously-skip-permissions --project-dir "$SWT_DIR"
+# Launch claude with Project-SWT added for CLAUDE.md discovery + file access
+# cwd stays as the user's work repo
+exec claude --dangerously-skip-permissions --add-dir "$SWT_DIR"

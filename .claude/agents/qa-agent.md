@@ -70,6 +70,7 @@ For each file that was changed:
    - **Style** — does the code match the existing codebase style?
    - **Scope** — does the change stay within the scope of the task? No unnecessary modifications?
    - **Side effects** — could this change break something else?
+   - **.NET config safety** — did the SWE modify `appsettings.json` connection strings/secrets, `launchSettings.json` env values, `.csproj`, or `.sln` files? If so, flag it immediately.
 
 ### 3. Run Tests
 

@@ -63,9 +63,10 @@ Developers. TPM assigns an instance number (SWE-1, SWE-2, etc.) when spawning.
 
 - Write local code changes with one-sentence explanations per change
 - Hunt for edge cases the user may be missing
+- Regression scan after changes (grep tests for references to modified code)
 - Research via web tools when needed
 - Familiarize deeply with the repo before writing code
-- Log work to Obsidian ticket notes
+- Report work to TPM (TPM writes Obsidian notes)
 - Log with `[SWE-<N>]` prefix
 
 Does NOT: run destructive git commands (commit, push, add, checkout, branch, merge, rebase, reset, stash, pull), create PRs, delete anything. CAN use read-only git (status, diff, log, blame, show).
@@ -135,6 +136,33 @@ TPM allocates SWE subagents like CPU cores — efficiency cores for routine work
 | High | Opus |
 
 ---
+
+## Multi-Session Ticket Continuity
+
+When booting in constrained mode and the ticket notes already exist from a previous session, TPM reads the last handoff summary and tells the user where things left off. Enables seamless pickup across sessions.
+
+## Pre-PR Checklist (CodeRabbit-Aware)
+
+Before creating a PR, TPM runs a checklist designed to catch issues that CodeRabbit would flag: unintended file changes, secrets, dead code, missing null checks, unused imports, etc. The user tests the ticket locally before the PR is created. The checklist is customizable per project via the parent knowledge file.
+
+## Regression Scan
+
+After SWEs make changes, they grep test directories for references to modified classes/methods and flag potential regression risks. QA gets this info in their review.
+
+## PR Description Generation
+
+After QA passes, TPM generates a PR description for the user to copy into Bitbucket. Max two sentences, simple language, no double dashes (`--`). Focuses on what changed and why.
+
+## Session Handoff Summary
+
+When the user wraps up a session, TPM writes a handoff summary to the Obsidian ticket notes: what's completed, in progress, pending, decisions made, and blockers. Enables seamless pickup in the next session.
+
+## .NET Guardrails
+
+SWE agents follow extra caution with .NET-specific files:
+- **Never modify** `appsettings.json` connection strings/secrets or `launchSettings.json` environment values
+- **Flag before changing** `.csproj`, `.sln`, or adding NuGet packages
+- **Be aware** that `dotnet run` and `dotnet test` can trigger implicit EF migrations
 
 ## AC Complete → Testing Workflow
 
@@ -259,7 +287,8 @@ These are non-negotiable and must be enforced in all agent definitions:
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents.
 10. **STAY IN CWD** — agents work in the user's current working directory. Do not navigate to other repos. (Exception: agents may read/write Obsidian notes and Project-SWT files as needed.)
-11. **NO DATABASE MIGRATION COMMANDS** — agents NEVER run `dotnet ef` migration commands (`dotnet ef database update`, `dotnet ef migrations add`, `dotnet ef migrations remove`, etc.) or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup** if the app is configured that way. Before running these commands, check with the user whether the app auto-migrates. If migrations are needed, agents report it to the user. The user handles all migrations.
+11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
+12. **NO DATABASE MIGRATION COMMANDS** — agents NEVER run `dotnet ef` migration commands (`dotnet ef database update`, `dotnet ef migrations add`, `dotnet ef migrations remove`, etc.) or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup** if the app is configured that way. Before running these commands, check with the user whether the app auto-migrates. If migrations are needed, agents report it to the user. The user handles all migrations.
 
 ---
 
