@@ -26,21 +26,12 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
    git clone https://github.com/T5-labs/Project-SWT.git ~/Project-SWT
    ```
 
-2. Create the launcher scripts in `~/bin`:
+2. Create the launcher in `~/bin`:
 
-   **Git Bash** (`~/bin/swt`):
    ```bash
-   #!/bin/bash
-   exec ~/Project-SWT/deploy.sh "$@"
-   ```
-   ```bash
+   echo '#!/bin/bash
+   exec ~/Project-SWT/deploy.sh "$@"' > ~/bin/swt
    chmod +x ~/bin/swt
-   ```
-
-   **PowerShell** (`~/bin/swt.ps1`):
-   ```powershell
-   # Adjust the Git Bash path if yours differs
-   & "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe" "$HOME\Project-SWT\deploy.sh" @args
    ```
 
 3. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian`)

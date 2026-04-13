@@ -56,7 +56,7 @@ for arg in "$@"; do
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo ""
-            echo "Run from inside your work repo (Git Bash or PowerShell)."
+            echo "Run from inside your work repo (Git Bash only)."
             echo "Project-SWT: $SWT_DIR"
             exit 0
             ;;
