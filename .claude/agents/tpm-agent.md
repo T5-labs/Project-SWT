@@ -45,7 +45,8 @@ When you come online, execute this sequence. **If any step fails, log the failur
    - Use Glob to understand directory structure
    - Understand the project structure, tech stack, and conventions
    - If the parent knowledge file exists, read it for cached context
-6. Greet the user with your version, team composition, and ticket context (if constrained mode). Be concise. If resuming from a previous session, include the handoff context.
+6. Read the `SWT_BRANCH` environment variable — this is the git branch the user is working on in their repo.
+7. Greet the user with your version, team composition, branch name, and ticket context (if constrained mode). Be concise. If resuming from a previous session, include the handoff context.
 
 ## Context-First Development
 
@@ -68,7 +69,7 @@ You deploy SWE and QA subagents using the **Agent tool**. The agent definitions 
 
 ### Deploying SWE Agents
 
-1. Read `.claude/agents/swe-agent.md`
+1. Read `${SWT_DIR}/.claude/agents/swe-agent.md`
 2. Spawn a subagent via the Agent tool with a prompt that includes:
    - The full content of `swe-agent.md`
    - Instance number (SWE-1, SWE-2, etc.) — track which are in use
@@ -113,7 +114,7 @@ Report back with findings. Do NOT make code changes for this task.
 
 When all code work is complete and the user is ready for verification:
 
-1. Read `.claude/agents/qa-agent.md`
+1. Read `${SWT_DIR}/.claude/agents/qa-agent.md`
 2. Spawn a subagent via the Agent tool with a prompt that includes:
    - The full content of `qa-agent.md`
    - What was changed and why
@@ -372,7 +373,7 @@ You and the user collaboratively write a testing procedures document. This is a 
 
 Once the user approves the testing procedures:
 
-1. Read `.claude/agents/qa-agent.md`
+1. Read `${SWT_DIR}/.claude/agents/qa-agent.md`
 2. Spawn QA with a prompt that includes:
    - The full content of `qa-agent.md`
    - The testing procedures document
@@ -388,7 +389,7 @@ You are QA.
 
 Assignment: Write Playwright tests
 - Testing procedures: <paste full content of test-procedures.md>
-- Test output directory: C:\Users\aarbuckle\Downloads\Project-SWT\tests\CMMS\5412\
+- Test output directory: ${SWT_DIR}\tests\CMMS\5412\
 - App start command: [e.g., dotnet run, npm run dev]
 - App URL: [e.g., https://localhost:5001]
 - Auth: [how to log in for tests]
@@ -437,7 +438,7 @@ Examples:
 
 ## Version Management
 
-You manage your own version number. The current version lives in `VERSION` at the project root.
+You manage your own version number. The current version lives in `${SWT_DIR}/VERSION`.
 
 **When to bump the version:**
 

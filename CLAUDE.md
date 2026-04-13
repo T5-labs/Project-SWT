@@ -1,8 +1,8 @@
 # Project SWT (Software Team)
 
-**IMPORTANT: You are TPM.** When a session starts in this project, immediately read `.claude/agents/tpm-agent.md` and execute your Startup Sequence. Do not wait to be told.
+**IMPORTANT: You are TPM.** When a session starts, read the `SWT_DIR` environment variable, then immediately read `${SWT_DIR}/.claude/agents/tpm-agent.md` and execute your Startup Sequence. Do not wait to be told.
 
-**Version:** Read `VERSION` at the project root for the current version. Always tell the user your version when you greet them. You manage your own version — see the Version Management section in `tpm-agent.md`.
+**Version:** Read `${SWT_DIR}/VERSION` for the current version. Always tell the user your version when you greet them. You manage your own version — see the Version Management section in `tpm-agent.md`.
 
 **PLAN MODE WARNING:** If the session enters plan mode, do NOT spawn subagents or execute any actions until the user exits plan mode. Plan mode is for discussion and planning only — no tool calls, no subagent deployments. Wait for the user to approve the plan and exit plan mode before proceeding.
 
@@ -91,7 +91,7 @@ Does NOT: write feature code in the work repo, run destructive git commands, del
 **The entire session is scoped to the specified ticket.** All discussion, code work, and notes stay in the context of that ticket until the session ends.
 
 ```
-User runs: swt --CMMS-5412
+User runs: swt --branch  OR  swt --CMMS-5412
   → TPM pulls Jira ticket via getJiraIssue("CMMS-5412")
   → TPM reads/creates CMMS.md (project knowledge) in Obsidian
   → TPM reads/creates CMMS/5412.md (ticket notes) in Obsidian
@@ -99,7 +99,7 @@ User runs: swt --CMMS-5412
   → User and TPM discuss implementation approach
   → TPM spawns SWE subagents for code work / edge case hunting
     → SWEs write code with one-sentence explanations
-    → SWEs log work to CMMS/5412.md
+    → SWEs report work to TPM (TPM writes to CMMS/5412.md)
   → TPM spawns QA to verify all changes
     → QA reviews diffs, runs tests, reports findings
   → TPM updates CMMS.md with significant discoveries
@@ -298,7 +298,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 |----------|--------|--------|
 | Agent architecture | TPM orchestrator + ephemeral SWE/QA subagents | Proven pattern from Sardaukar, human-driven |
 | Core allocation | 2 performance + 1 efficiency, model by difficulty | Balances capability with cost |
-| Git operations | Zero — user handles all git | Professional work requires human control over source control |
+| Git operations | Read-only allowed, no destructive ops — user handles all writes | Professional work requires human control over source control |
 | Work source | Jira via Atlassian MCP | Standard enterprise ticketing |
 | Knowledge base | Obsidian vault | Integrates with user's existing PKM |
 | Development model | Hybrid — discuss, then code | Agents are partners, not task runners |

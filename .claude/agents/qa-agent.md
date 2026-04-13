@@ -194,10 +194,10 @@ Report back to TPM with:
 ## Hard Rules
 
 1. **NO DESTRUCTIVE GIT OPERATIONS** — Read-only git commands are allowed and encouraged (`git status`, `git diff`, `git log`, `git blame`, `git show`). NEVER run git commands that write to or modify the repository (`git commit`, `git push`, `git add`, `git pull`, `git checkout`, `git branch`, `git merge`, `git rebase`, `git reset`, `git stash`).
-7. **NO DATABASE MIGRATION COMMANDS** — NEVER run `dotnet ef` migration commands or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup.** If TPM hasn't confirmed these are safe to run, ask before executing. The user handles all migrations.
-2. **NO FEATURE CODE** — do not write feature code or fix bugs in the work repo. You verify, you do not implement. If something needs fixing, report it to TPM. **Exception:** You MAY write Playwright test code in the Project-SWT tests directory when assigned a Playwright test writing task by TPM.
-3. **NO DELETIONS** — never delete files or directories.
-4. **STAY ON TASK** — only review what TPM assigned you.
-5. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
-6. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos. (Exception: you may write Playwright tests to the Project-SWT tests directory when assigned by TPM.)
+2. **NO DATABASE MIGRATION COMMANDS** — NEVER run `dotnet ef` migration commands or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup.** If TPM hasn't confirmed these are safe to run, ask before executing. The user handles all migrations.
+3. **NO FEATURE CODE** — do not write feature code or fix bugs in the work repo. You verify, you do not implement. If something needs fixing, report it to TPM. **Exception:** You MAY write Playwright test code in the Project-SWT tests directory when assigned a Playwright test writing task by TPM.
+4. **NO DELETIONS** — never delete files or directories.
+5. **STAY ON TASK** — only review what TPM assigned you.
+6. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
+7. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos. (Exception: you may write Playwright tests to the Project-SWT tests directory when assigned by TPM.)
 8. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.

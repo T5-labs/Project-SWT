@@ -6,8 +6,9 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 
 ```bash
 # cd into your work repo first, then:
-swt                    # Unconstrained — ad-hoc tasks, no ticket context
-swt --CMMS-5412        # Constrained — entire session scoped to a Jira ticket
+swt                    # Unconstrained — general team, no ticket context
+swt --branch           # Constrained — auto-detects ticket from git branch name
+swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 ```
 
 ## Setup
@@ -40,7 +41,7 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 
 ### Development Phase
 
-1. **Boot** — `swt --CMMS-5412` pulls the Jira ticket, sets up Obsidian notes, familiarizes with repo
+1. **Boot** — `swt --branch` or `swt --CMMS-5412` pulls the Jira ticket, sets up Obsidian notes, familiarizes with repo
 2. **Discuss** — TPM and user talk through implementation, edge cases, trade-offs
 3. **Code** — TPM deploys SWEs with file ownership boundaries. SWEs write code with one-sentence explanations per change.
 4. **Review** — TPM deploys QA to verify all changes. QA reports PASS/FAIL.
@@ -102,5 +103,6 @@ Project-SWT/
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Constrained** | `swt --CMMS-5412` | Session scoped to ticket. Pulls Jira, sets up Obsidian notes, all work in context of that ticket. |
-| **Unconstrained** | `swt` | No ticket context. Ad-hoc tasks. TPM can bootstrap constrained mode mid-session if you reference a ticket. |
+| **Unconstrained** | `swt` | No ticket context. General team ready to help with whatever you need. TPM can bootstrap constrained mode mid-session if you reference a ticket. |
+| **Constrained (auto)** | `swt --branch` | Detects ticket from your git branch name (e.g., `CMMS-2563-add-login` → `CMMS-2563`). Pulls Jira, sets up Obsidian notes, session scoped to that ticket. |
+| **Constrained (manual)** | `swt --CMMS-5412` | Manually specify a ticket. Same behavior as auto, but you choose the ticket regardless of branch. |

@@ -3,8 +3,9 @@
 # Pulls latest Project-SWT from git, then starts claude in the user's cwd.
 #
 # Usage:
-#   swt                      → unconstrained mode (no ticket context)
-#   swt --CMMS-5412          → constrained mode (pulls Jira ticket, sets up Obsidian notes)
+#   swt                      → unconstrained mode (general team, no ticket context)
+#   swt --branch             → constrained mode (auto-detect ticket from git branch)
+#   swt --CMMS-5412          → constrained mode (manually specify Jira ticket)
 #
 # Install:
 #   Add this script's directory to your PATH, or symlink it:
@@ -26,6 +27,9 @@ export SWT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Save the user's current working directory — this is the work repo
 WORK_DIR="$(pwd)"
 
+# Detect current git branch in the work repo (if it's a git repo)
+export SWT_BRANCH="$(git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "none")"
+
 # Pull latest Project-SWT agent definitions
 echo "[swt] Pulling latest agent definitions..."
 cd "$SWT_DIR"
@@ -44,14 +48,32 @@ TICKET_COUNT=0
 for arg in "$@"; do
     case "$arg" in
         --help|-h)
-            echo "Usage: swt [--PROJECT-NUMBER]"
+            echo "Usage: swt [options]"
             echo ""
-            echo "  swt                    Unconstrained mode (ad-hoc tasks)"
-            echo "  swt --CMMS-5412        Constrained mode (scoped to Jira ticket)"
+            echo "  swt                    Unconstrained mode (general team, no ticket context)"
+            echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
+            echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo ""
             echo "Run from inside your work repo (Git Bash only)."
             echo "Project-SWT: $SWT_DIR"
             exit 0
+            ;;
+        --branch)
+            # Auto-detect ticket from current git branch name
+            if [ "$SWT_BRANCH" != "none" ] && [[ "$SWT_BRANCH" =~ ^([A-Za-z]+)-([0-9]+) ]]; then
+                SWT_PROJECT=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+                SWT_NUMBER="${BASH_REMATCH[2]}"
+                SWT_TICKET="${SWT_PROJECT}-${SWT_NUMBER}"
+                MODE="constrained"
+                export SWT_TICKET
+                export SWT_PROJECT
+                export SWT_NUMBER
+                echo "[swt] Auto-detected ticket from branch: $SWT_TICKET"
+            else
+                echo "[swt] Could not detect ticket from branch: $SWT_BRANCH"
+                echo "[swt] Expected branch format: PROJECT-NUMBER-description (e.g., CMMS-2563-add-login)"
+                exit 1
+            fi
             ;;
         --*)
             # Parse --PROJECT-NUMBER (e.g., --CMMS-5412)
@@ -107,6 +129,7 @@ else
 fi
 
 echo "│  Work dir: ${WORK_DIR}"
+echo "│  Branch:   ${SWT_BRANCH}"
 echo "└─────────────────────────────────────────────────┘"
 echo ""
 
