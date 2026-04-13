@@ -1,4 +1,4 @@
-# Project SWT (Software Team)
+# Project SWT
 
 A hybrid development agent team for professional Jira-based software work. TPM orchestrates SWE and QA subagents to collaboratively develop features, find edge cases, verify code quality, and write Playwright tests.
 
