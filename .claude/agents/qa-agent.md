@@ -25,7 +25,7 @@ TPM gives you everything you need when spawning you. Your assignment will be one
 **Playwright test writing assignment:**
 - Testing procedures document (the test scenarios to implement)
 - Test output directory path (inside Project-SWT/tests/)
-- How to start the application (command, URL, port)
+- Tests root path (for shared playwright.config.ts)
 - Auth and test data requirements
 - Ticket context
 
@@ -142,6 +142,36 @@ When TPM assigns you a Playwright test writing task (after AC is met and testing
 ### 1. Read the Testing Procedures
 
 The testing procedures document (`test-procedures.md`) is your contract. Each test procedure (TP-1, TP-2, etc.) becomes one or more Playwright test cases. Do not invent tests that aren't in the procedures — and do not skip procedures.
+
+### 1.5. Ensure Playwright Config Exists
+
+Before writing test specs, check if `{SWT_DIR}/tests/playwright.config.ts` exists.
+
+**If it exists:** Read it to understand the setup. Your test spec should be compatible with it.
+
+**If it does NOT exist:** Generate one at `{SWT_DIR}/tests/playwright.config.ts`.
+
+Use this template:
+```typescript
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './',
+  timeout: 30_000,
+  retries: 0,
+  use: {
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    ignoreHTTPSErrors: true,
+  },
+});
+```
+
+The base URL is set via the `BASE_URL` environment variable at runtime, so the config works for any project. The user runs tests with:
+```bash
+BASE_URL=https://localhost:5001 npx playwright test CMMS/5412/
+```
+
+Report whether you created or reused the config in your return message.
 
 ### 2. Set Up the Test File
 
