@@ -62,7 +62,9 @@ for arg in "$@"; do
             ;;
         --branch)
             # Auto-detect ticket from current git branch name
-            if [ "$SWT_BRANCH" != "none" ] && [[ "$SWT_BRANCH" =~ ^([A-Za-z]+)-([0-9]+) ]]; then
+            # Strip optional prefix (bugfix/, feature/, hotfix/, etc.) before matching
+            BRANCH_NAME="${SWT_BRANCH##*/}"
+            if [ "$SWT_BRANCH" != "none" ] && [[ "$BRANCH_NAME" =~ ^([A-Za-z]+)-([0-9]+) ]]; then
                 SWT_PROJECT=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
                 SWT_NUMBER="${BASH_REMATCH[2]}"
                 SWT_TICKET="${SWT_PROJECT}-${SWT_NUMBER}"
