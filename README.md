@@ -38,7 +38,7 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
    chmod +x ~/bin/swt
    ```
 
-3. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian`)
+3. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`)
 
 ### Verify
 

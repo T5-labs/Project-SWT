@@ -188,7 +188,7 @@ Project-SWT/tests/          ← gitignored
 
 ## Obsidian Knowledge Base
 
-Base path configured in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian`).
+Base path configured in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`).
 
 ### Structure
 

@@ -1,6 +1,6 @@
 # SWT Configuration
 # Base path for Obsidian notes — agents create project/ticket files here
-obsidian_base_path: "C:\\Users\\aarbuckle\\Documents\\Obsidian"
+obsidian_base_path: "C:\\Users\\aarbuckle\\Documents\\Obsidian\\aarbuckle"
 
 # Agent Team Configuration
 swe_agent_count: 3          # Total max concurrent SWE subagents

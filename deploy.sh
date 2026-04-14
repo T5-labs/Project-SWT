@@ -132,8 +132,9 @@ else
     echo "│  Mode: Unconstrained (ad-hoc)                   │"
 fi
 
-echo "│  Work dir: ${WORK_DIR}"
-echo "│  Branch:   ${SWT_BRANCH}"
+echo "│  Work dir:  ${WORK_DIR}"
+echo "│  Branch:    ${SWT_BRANCH}"
+echo "│  Obsidian:  ${OBSIDIAN_PATH:-not configured}"
 echo "└─────────────────────────────────────────────────┘"
 echo ""
 
