@@ -44,6 +44,7 @@ SWT_TICKET=""
 SWT_PROJECT=""
 SWT_NUMBER=""
 MODE="unconstrained"
+REMOTE=false
 
 TICKET_COUNT=0
 for arg in "$@"; do
@@ -54,10 +55,14 @@ for arg in "$@"; do
             echo "  swt                    Unconstrained mode (general team, no ticket context)"
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
+            echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo ""
             echo "Run from inside your work repo (Git Bash only)."
             echo "Project-SWT: $SWT_DIR"
             exit 0
+            ;;
+        --remote)
+            REMOTE=true
             ;;
         --branch)
             # Auto-detect ticket from current git branch name
@@ -149,4 +154,11 @@ echo ""
 
 # Launch claude with TPM identity loaded from CLAUDE.md + Project-SWT file access
 # cwd stays as the user's work repo
-exec claude --dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system-prompt-file "$SWT_DIR/CLAUDE.md"
+CLAUDE_ARGS=(--dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system-prompt-file "$SWT_DIR/CLAUDE.md")
+
+if [ "$REMOTE" = true ]; then
+    CLAUDE_ARGS+=(--remote-control)
+    echo "[swt] Remote control enabled"
+fi
+
+exec claude "${CLAUDE_ARGS[@]}"

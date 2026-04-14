@@ -93,6 +93,7 @@ Does NOT: write feature code in the work repo, run destructive git commands, del
 
 ```
 User runs: swt --branch  OR  swt --CMMS-5412
+  → TPM resolves Atlassian cloud ID from swt.yml (or discovers via MCP)
   → TPM pulls Jira ticket via getJiraIssue("CMMS-5412")
   → TPM reads/creates CMMS/CMMS.md (project knowledge) in Obsidian
   → TPM reads/creates CMMS/5412.md (ticket notes) in Obsidian
@@ -231,6 +232,8 @@ Per-ticket working notes. Contains:
 
 ## Jira Integration
 
+The Atlassian cloud ID and site are configured in `.claude/config/swt.yml`. If not configured, TPM discovers available sites via `getAccessibleAtlassianResources` on startup and uses the first result.
+
 Agents interact with Jira via Atlassian MCP tools. Available operations:
 
 | Tool | Purpose |
@@ -260,7 +263,7 @@ Project-SWT/
 ├── .gitignore                             # Ignores tests/ directory
 ├── .claude/
 │   ├── config/
-│   │   └── swt.yml                        # Base paths, core allocation config
+│   │   └── swt.yml                        # Base paths, core allocation, Atlassian config
 │   ├── settings.json                      # Permission settings
 │   └── agents/
 │       ├── tpm-agent.md                   # TPM agent definition

@@ -7,3 +7,7 @@ swe_agent_count: 3          # Total max concurrent SWE subagents
 swe_efficiency_cores: 1     # Routine tasks
 swe_performance_cores: 2    # Complex tasks
 qa_agent_count: 1           # Max concurrent QA subagents
+
+# Atlassian / Jira Configuration
+atlassian_cloud_id: "c636d04f-2517-4658-97ec-9f0e61f6ec55"
+atlassian_site: "herzog.atlassian.net"

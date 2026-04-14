@@ -38,7 +38,10 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
    chmod +x ~/bin/swt
    ```
 
-3. Configure Obsidian base path in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`)
+3. Configure `.claude/config/swt.yml`:
+   - `obsidian_base_path` — path to your Obsidian vault (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`)
+   - `atlassian_cloud_id` — your Atlassian Cloud tenant ID (find via Atlassian admin or let TPM discover it on first boot)
+   - `atlassian_site` — your Atlassian site URL (e.g., `herzog.atlassian.net`)
 
 ### Verify
 
@@ -62,10 +65,11 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 When TPM starts, it prints structured status lines:
 
 ```
-[swt] ✓ Version: 0.7.1
+[swt] ✓ Version: 0.7.2
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
+[swt] ✓ Atlassian: herzog.atlassian.net
 [swt] ✓ Ticket: CMMS-2576 (pulled from Jira)
 [swt] ✓ Knowledge: CMMS/CMMS.md found
 [swt] ✓ Notes: CMMS/2576.md resuming from 2026-04-13
@@ -132,7 +136,7 @@ Project-SWT/
 ├── .gitignore                    # Ignores tests/
 ├── .claude/
 │   ├── config/
-│   │   └── swt.yml               # Obsidian path, core allocation
+│   │   └── swt.yml               # Obsidian path, core allocation, Atlassian config
 │   ├── settings.json             # Permission settings
 │   └── agents/
 │       ├── tpm-agent.md          # TPM definition
