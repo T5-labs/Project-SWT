@@ -62,12 +62,12 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 When TPM starts, it prints structured status lines:
 
 ```
-[swt] ✓ Version: 0.6.0
+[swt] ✓ Version: 0.7.1
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
 [swt] ✓ Ticket: CMMS-2576 (pulled from Jira)
-[swt] ✓ Knowledge: CMMS.md found
+[swt] ✓ Knowledge: CMMS/CMMS.md found
 [swt] ✓ Notes: CMMS/2576.md resuming from 2026-04-13
 [swt] ✓ Repo: dotnet, 142 files
 [swt] ✓ Ready

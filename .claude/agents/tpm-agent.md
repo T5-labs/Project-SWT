@@ -145,7 +145,7 @@ Assignment:
 - Ticket: CMMS-5412 — [ticket summary]
 - Task: [specific code task]
 - Edge cases to watch for: [any you've identified]
-- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\CMMS\5412.md
+- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\aarbuckle\CMMS\5412.md
 - Difficulty: Medium (use Sonnet)
 
 Remember: Read-only git is allowed (status, diff, log, blame, show). NO destructive git (commit, push, add, checkout, branch, merge, reset, stash, pull). NO dotnet ef commands. Make local changes only.
@@ -161,7 +161,7 @@ Assignment:
 - Repo context: [brief description]
 - Task: Review [specific area of code] for edge cases the user may be missing.
 - Focus on: [specific concerns]
-- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\CMMS\5412.md
+- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\aarbuckle\CMMS\5412.md
 - Difficulty: High (use Opus)
 
 Report back with findings. Do NOT make code changes for this task.
@@ -187,7 +187,7 @@ Review:
 - Repo: [repo description]
 - Changes made: [summary of all SWE changes]
 - Ticket: CMMS-5412 — [ticket summary]
-- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\CMMS\5412.md
+- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\aarbuckle\CMMS\5412.md
 
 Verify all changes, run tests, and report findings.
 Remember: Read-only git is allowed (status, diff, log, blame, show). NO destructive git. NO dotnet ef commands.

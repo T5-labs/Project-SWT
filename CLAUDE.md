@@ -34,8 +34,9 @@ User's Work Repo (cwd)
 ├── Jira (via Atlassian MCP)
 │   └── Ticket descriptions, context
 └── Obsidian Vault
-    ├── {PROJECT}.md                          ← living knowledge base per project
-    └── {PROJECT}/{NUMBER}.md                 ← per-ticket agent notes
+    └── {PROJECT}/
+        ├── {PROJECT}.md                      ← living knowledge base per project
+        └── {NUMBER}.md                       ← per-ticket agent notes
 ```
 
 ---
@@ -93,7 +94,7 @@ Does NOT: write feature code in the work repo, run destructive git commands, del
 ```
 User runs: swt --branch  OR  swt --CMMS-5412
   → TPM pulls Jira ticket via getJiraIssue("CMMS-5412")
-  → TPM reads/creates CMMS.md (project knowledge) in Obsidian
+  → TPM reads/creates CMMS/CMMS.md (project knowledge) in Obsidian
   → TPM reads/creates CMMS/5412.md (ticket notes) in Obsidian
   → TPM familiarizes with the repo (user's cwd)
   → User and TPM discuss implementation approach
@@ -102,7 +103,7 @@ User runs: swt --branch  OR  swt --CMMS-5412
     → SWEs report work to TPM (TPM writes to CMMS/5412.md)
   → TPM spawns QA to verify all changes
     → QA reviews diffs, runs tests, reports findings
-  → TPM updates CMMS.md with significant discoveries
+  → TPM updates CMMS/CMMS.md with significant discoveries
 ```
 
 ### Unconstrained Mode (ad-hoc work)

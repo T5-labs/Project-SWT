@@ -11,7 +11,6 @@
 #   See README.md for full setup. Quick version:
 #   1. Create ~/bin/swt with: exec ~/Project-SWT/deploy.sh "$@"
 #   2. chmod +x ~/bin/swt
-#   3. For PowerShell: create ~/bin/swt.ps1 (see README)
 
 set -e
 
