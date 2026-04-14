@@ -11,3 +11,18 @@ qa_agent_count: 1           # Max concurrent QA subagents
 # Atlassian / Jira Configuration
 atlassian_cloud_id: "c636d04f-2517-4658-97ec-9f0e61f6ec55"
 atlassian_site: "herzog.atlassian.net"
+
+# Database Access (via LINQPad)
+# Set to false to disable all database access for agents
+database_enabled: true
+lprun_path: "C:\\Program Files\\LINQPad8\\LPRun8.exe"
+
+# Allowlisted databases — agents can ONLY query databases in this list.
+# Each entry maps a Jira project key to a LINQPad saved connection name.
+# To add a new database:
+#   1. Create a connection in LINQPad 8 and note its exact name
+#   2. Add an entry below with the project key and connection name
+#   3. Restart your SWT session for changes to take effect
+databases:
+  - project: CMMS
+    connection: "localhost, 1433.cmms"

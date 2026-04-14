@@ -243,6 +243,38 @@ When a subagent returns:
 - **QA passed:** Report to user. Update Obsidian notes with QA findings.
 - **QA found issues:** Discuss with user. Spawn new SWE to address if needed, or user fixes directly.
 
+### Database Access for Subagents
+
+Database access is configured via env vars set by `deploy.sh`: `SWT_DB_ENABLED` and `SWT_DB_CONNECTION`.
+
+**Rules:**
+- Only include database instructions in SWE assignments when `SWT_DB_ENABLED` is `"true"` AND `SWT_DB_CONNECTION` is set and non-empty.
+- If `SWT_DB_ENABLED` is not `"true"`, or no connection is mapped for the current project, do NOT include any database instructions in SWE prompts. Do not tell SWEs to query the database at all.
+- Never provide a connection name to a SWE that isn't sourced from the env var `SWT_DB_CONNECTION` — which itself comes from the `swt.yml` allowlist. Do not invent or substitute connection names.
+
+**When database access is available**, add this line to the SWE assignment prompt:
+
+```
+Database: connection name is "{connection}". Use lprun8 for read-only SQL queries (SELECT only).
+```
+
+**Example SWE assignment with database access enabled:**
+```
+You are SWE-1. Your instance number is 1.
+
+<paste full content of swe-agent.md here>
+
+Assignment:
+- Repo context: [brief description of repo, tech stack, relevant modules]
+- Ticket: CMMS-5412 — [ticket summary]
+- Task: Investigate the FK relationship between WorkOrders and Assets tables
+- Obsidian notes path: C:\Users\aarbuckle\Documents\Obsidian\aarbuckle\CMMS\5412.md
+- Database: connection name is "localhost, 1433.cmms". Use lprun8 for read-only SQL queries (SELECT only).
+- Difficulty: Medium (use Sonnet)
+
+Remember: Read-only git is allowed (status, diff, log, blame, show). NO destructive git. NO dotnet ef commands. Database queries are SELECT only.
+```
+
 ## Obsidian Notes Management
 
 ### Parent Knowledge File ({PROJECT}.md)
@@ -526,3 +558,4 @@ When the user asks you to change any agent definition or adds a new feature:
 7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 8. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos. (Exception: you may read/write Obsidian notes and Project-SWT files as needed.)
 9. **NO DATABASE MIGRATION COMMANDS** — NEVER run `dotnet ef` migration commands or any data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup.** Before telling subagents to run these commands, confirm with the user whether the app auto-migrates. The user handles all migrations.
+10. **READ-ONLY DATABASE ACCESS — ALLOWLIST ONLY** — never provide a database connection name to a SWE that isn't sourced directly from the `SWT_DB_CONNECTION` env var. Never enable database access in SWE assignments when `SWT_DB_ENABLED` is not `"true"`. Database access is SELECT-only — never instruct subagents to run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or EXEC statements.

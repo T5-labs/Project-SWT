@@ -159,6 +159,17 @@ After QA passes, TPM generates a PR description for the user to copy into Bitbuc
 
 When the user wraps up a session, TPM writes a handoff summary to the Obsidian ticket notes: what's completed, in progress, pending, decisions made, and blockers. Enables seamless pickup in the next session.
 
+## Database Access (Read-Only)
+
+Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP tools. Access is configured in `swt.yml` with a global `database_enabled` toggle and an allowlisted `databases` list mapping project keys to connection names.
+
+- Agents can ONLY query databases whose connection name appears in the `swt.yml` allowlist — no exceptions
+- `deploy.sh` resolves the connection name for the current project and passes it to TPM via env vars (`SWT_DB_ENABLED`, `SWT_DB_CONNECTION`)
+- TPM includes the connection name in SWE assignments when database access is needed
+- SWE agents can use `lprun8` to understand schema, verify FK relationships, inspect data state, and confirm migration status
+- **READ-ONLY ONLY** — agents can ONLY run SELECT statements. INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC are absolutely forbidden.
+- This does NOT replace the rule against running migration commands — agents still NEVER run `dotnet ef` or any migration tool
+
 ## .NET Guardrails
 
 SWE agents follow extra caution with .NET-specific files:
@@ -293,6 +304,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 10. **STAY IN CWD** — agents work in the user's current working directory. Do not navigate to other repos. (Exception: agents may read/write Obsidian notes and Project-SWT files as needed.)
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DATABASE MIGRATION COMMANDS** — agents NEVER run `dotnet ef` migration commands (`dotnet ef database update`, `dotnet ef migrations add`, `dotnet ef migrations remove`, etc.) or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup** if the app is configured that way. Before running these commands, check with the user whether the app auto-migrates. If migrations are needed, agents report it to the user. The user handles all migrations.
+13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt.yml`.
 
 ---
 

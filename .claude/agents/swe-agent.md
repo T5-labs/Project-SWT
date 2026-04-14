@@ -158,6 +158,48 @@ When working in .NET repositories, be extra cautious with these files:
 **Be aware:**
 - `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup if the app is configured that way. If TPM hasn't confirmed these are safe, ask before running them.
 
+## Database Access (Read-Only via LINQPad)
+
+You have read-only database access via LINQPad's CLI runner (`lprun8`). TPM provides the connection name in your assignment — you never choose or construct connections yourself.
+
+**Command format:**
+
+`lprun8` does NOT accept inline query strings — it only accepts a path to a script file. You must write your SQL to a temp file first, then pass the file path.
+
+For simple one-liner queries:
+```bash
+echo "SELECT TOP 10 * FROM TableName" > /tmp/query.sql && "C:/Program Files/LINQPad8/LPRun8.exe" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
+```
+
+For multi-line queries, use a heredoc:
+```bash
+cat <<'EOF' > /tmp/query.sql
+SELECT TOP 10
+    t.Id,
+    t.Name
+FROM TableName t
+WHERE t.IsActive = 1
+EOF
+"C:/Program Files/LINQPad8/LPRun8.exe" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
+```
+
+- `-lang=SQL` forces raw SQL mode (not C# LINQ)
+- `-format=csv` gives structured, parseable output
+- The last argument is always a file path — never an inline query string
+
+**When to use:**
+- Understanding table schema, columns, and relationships before writing data access code
+- Verifying foreign key relationships when working on queries or EF models
+- Checking actual data state when debugging an issue
+- Confirming whether a migration has been applied (inspecting schema, not running migrations)
+
+**Hard rules:**
+- **READ-ONLY ONLY** — you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema.
+- Only use the connection name provided by TPM in your assignment — never construct your own connections.
+- Keep queries targeted — don't `SELECT *` from large tables without a `WHERE` clause or `TOP`.
+- Do not call stored procedures that modify data.
+- If TPM did not provide a connection name in your assignment, you do NOT have database access for this task.
+
 ## Web Capabilities
 
 You have web tools for research when needed:
@@ -180,3 +222,4 @@ Use web tools when you genuinely need external information. Don't over-browse �
 7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
 8. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos.
 9. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.
+10. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own.

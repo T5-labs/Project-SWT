@@ -117,6 +117,23 @@ if [ -n "$OBSIDIAN_PATH" ] && [ ! -d "$OBSIDIAN_PATH" ]; then
     echo "[swt] Agents will create it on first use, or update .claude/config/swt.yml"
 fi
 
+# ── Resolve Database Config ──────────────────────────────────────
+DB_ENABLED_RAW=$(grep 'database_enabled' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *//')
+if [ "$DB_ENABLED_RAW" = "true" ]; then
+    export SWT_DB_ENABLED="true"
+else
+    export SWT_DB_ENABLED="false"
+fi
+
+LPRUN_RAW=$(grep 'lprun_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+export SWT_LPRUN_PATH="$LPRUN_RAW"
+
+SWT_DB_CONNECTION=""
+if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_PROJECT" ]; then
+    SWT_DB_CONNECTION=$(awk "/- project: $SWT_PROJECT\$/{getline; gsub(/.*connection: *\"|\"$/,\"\"); print}" "$SWT_DIR/.claude/config/swt.yml")
+fi
+export SWT_DB_CONNECTION
+
 # ── Boot Diagnostics ──────────────────────────────────────────────
 echo ""
 echo "┌──────────────────────────────────────────────────────────────────────────────────────┐"
@@ -139,6 +156,15 @@ fi
 printf "│  %-84s│\n" "Work dir:  ${WORK_DIR}"
 printf "│  %-84s│\n" "Branch:    ${SWT_BRANCH}"
 printf "│  %-84s│\n" "Obsidian:  ${OBSIDIAN_PATH:-not configured}"
+if [ "$SWT_DB_ENABLED" = "true" ]; then
+    if [ -n "$SWT_DB_CONNECTION" ]; then
+        printf "│  %-84s│\n" "Database:  ${SWT_DB_CONNECTION} (via LINQPad)"
+    else
+        printf "│  %-84s│\n" "Database:  enabled (no mapping for project)"
+    fi
+else
+    printf "│  %-84s│\n" "Database:  disabled"
+fi
 echo "└──────────────────────────────────────────────────────────────────────────────────────┘"
 echo ""
 
