@@ -18,6 +18,10 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
 - Git Bash (comes with [Git for Windows](https://git-scm.com/download/win))
 - A `~/bin` directory on your PATH (create with `mkdir -p ~/bin`)
+- Set Git Bash path for Claude Code in `~/.bashrc`:
+  ```bash
+  export CLAUDE_CODE_GIT_BASH_PATH="C:\Users\aarbuckle\AppData\Local\Programs\Git\bin\bash.exe"
+  ```
 
 ### Install
 
@@ -53,6 +57,24 @@ swt --help
 
 Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, or Haiku per agent.
 
+## Boot Sequence
+
+When TPM starts, it prints structured status lines:
+
+```
+[swt] ✓ Version: 0.6.0
+[swt] ✓ Config loaded (swt.yml)
+[swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
+[swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
+[swt] ✓ Ticket: CMMS-2576 (pulled from Jira)
+[swt] ✓ Knowledge: CMMS.md found
+[swt] ✓ Notes: CMMS/2576.md resuming from 2026-04-13
+[swt] ✓ Repo: dotnet, 142 files
+[swt] ✓ Ready
+```
+
+If any step fails, it prints an X and continues to the next step. If Jira is unavailable, TPM asks you to paste the ticket description.
+
 ## Workflow
 
 ### Development Phase
@@ -60,8 +82,11 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 1. **Boot** — `swt --branch` or `swt --CMMS-5412` pulls the Jira ticket, sets up Obsidian notes, familiarizes with repo
 2. **Discuss** — TPM and user talk through implementation, edge cases, trade-offs
 3. **Code** — TPM deploys SWEs with file ownership boundaries. SWEs write code with one-sentence explanations per change.
-4. **Review** — TPM deploys QA to verify all changes. QA reports PASS/FAIL.
-5. **Commit** — User handles all git operations (commit, push, branch)
+4. **Regression scan** — SWEs grep test directories for references to modified code and flag potential risks
+5. **Review** — TPM deploys QA to verify all changes. QA cross-references SWE regression findings. Reports PASS/FAIL.
+6. **Pre-PR checklist** — TPM runs a CodeRabbit-aware checklist (unintended changes, secrets, dead code, null checks, etc.)
+7. **PR description** — TPM generates a two-sentence PR description for Bitbucket
+8. **Commit** — User handles all git operations (commit, push, branch)
 
 ### Testing Phase (after AC is met)
 
@@ -70,10 +95,27 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 3. **Playwright tests** — TPM deploys QA to write Playwright specs based on the procedures
 4. **Tests saved** to `Project-SWT/tests/{PROJECT}/{NUMBER}/` (gitignored)
 
+### Session End
+
+When you wrap up, TPM writes a handoff summary to Obsidian notes (completed, in progress, pending, decisions, blockers). Next session picks up where you left off.
+
+## Branch Detection
+
+`swt --branch` extracts the ticket from your git branch name. Supports prefixed and unprefixed branches:
+
+| Branch | Detected Ticket |
+|--------|----------------|
+| `CMMS-2576-add-login` | CMMS-2576 |
+| `bugfix/CMMS-2576-fix-null` | CMMS-2576 |
+| `feature/MCP-1234-new-endpoint` | MCP-1234 |
+| `HITS-0088-update-dashboard` | HITS-0088 |
+| `main` | No match (unconstrained) |
+
 ## Rules
 
 - **No destructive git** — Agents use read-only git (`status`, `diff`, `log`, `blame`, `show`) but NEVER write (`commit`, `push`, `add`, `checkout`, `branch`, `merge`, `reset`, `stash`, `pull`)
-- **No dotnet ef** — Agents never run database migration commands
+- **No dotnet ef** — Agents never run database migration commands. Aware that `dotnet run`/`dotnet test` can trigger implicit migrations.
+- **Protect .NET configs** — Never modify `appsettings.json` secrets/connection strings or `launchSettings.json` env values. Flag `.csproj`, `.sln`, and NuGet changes before proceeding.
 - **Jira is read-only** — Agents pull ticket context but never modify tickets
 - **No deletions** — Agents suggest removals, user executes
 - **Obsidian notes** — Only TPM writes to Obsidian; SWEs and QA report back to TPM
@@ -83,7 +125,7 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 
 ```
 Project-SWT/
-├── CLAUDE.md                     # TPM system prompt
+├── CLAUDE.md                     # TPM system prompt (loaded via --append-system-prompt-file)
 ├── README.md                     # This file
 ├── VERSION                       # Current version
 ├── deploy.sh                     # The swt command
@@ -113,12 +155,12 @@ Project-SWT/
 ```
 
 - **Parent file** (`CMMS.md`) — architecture, conventions, gotchas. Agents read first, update with significant discoveries.
-- **Ticket notes** (`CMMS/5412.md`) — Jira summary, implementation notes, SWE changes, edge cases, QA findings.
+- **Ticket notes** (`CMMS/5412.md`) — Jira summary, implementation notes, SWE changes, edge cases, QA findings, session handoff.
 
 ## Modes
 
 | Mode | Command | Behavior |
 |------|---------|----------|
 | **Unconstrained** | `swt` | No ticket context. General team ready to help with whatever you need. TPM can bootstrap constrained mode mid-session if you reference a ticket. |
-| **Constrained (auto)** | `swt --branch` | Detects ticket from your git branch name (e.g., `CMMS-2563-add-login` → `CMMS-2563`). Pulls Jira, sets up Obsidian notes, session scoped to that ticket. |
+| **Constrained (auto)** | `swt --branch` | Detects ticket from your git branch name (e.g., `CMMS-2563-add-login` or `bugfix/CMMS-2563-fix` → `CMMS-2563`). Pulls Jira, sets up Obsidian notes, session scoped to that ticket. |
 | **Constrained (manual)** | `swt --CMMS-5412` | Manually specify a ticket. Same behavior as auto, but you choose the ticket regardless of branch. |
