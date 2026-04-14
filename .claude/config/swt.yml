@@ -26,3 +26,5 @@ lprun_path: "C:\\Program Files\\LINQPad8\\LPRun8.exe"
 databases:
   - project: CMMS
     connection: "localhost, 1433.cmms"
+  - project: MCP
+    connection: "mcpdevsql.MCP_Dev"
