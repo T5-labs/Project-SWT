@@ -148,13 +148,13 @@ Project-SWT/
 
 ```
 {obsidian_base_path}/
-├── CMMS.md                       # Living knowledge base for CMMS project
 ├── CMMS/
+│   ├── CMMS.md                   # Living knowledge base for CMMS project
 │   ├── 5412.md                   # Ticket notes for CMMS-5412
 │   └── 5423.md                   # Ticket notes for CMMS-5423
 ```
 
-- **Parent file** (`CMMS.md`) — architecture, conventions, gotchas. Agents read first, update with significant discoveries.
+- **Parent file** (`CMMS/CMMS.md`) — architecture, conventions, gotchas. Agents read first, update with significant discoveries.
 - **Ticket notes** (`CMMS/5412.md`) — Jira summary, implementation notes, SWE changes, edge cases, QA findings, session handoff.
 
 ## Modes

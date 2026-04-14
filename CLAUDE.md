@@ -194,12 +194,12 @@ Base path configured in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\D
 
 ```
 {obsidian_base_path}/
-├── CMMS.md              ← Living knowledge base for the CMMS project/repo
 ├── CMMS/
+│   ├── CMMS.md          ← Living knowledge base for the CMMS project/repo
 │   ├── 5412.md          ← Ticket notes for CMMS-5412
 │   └── 5423.md          ← Ticket notes for CMMS-5423
-├── INFRA.md             ← Living knowledge base for INFRA
 ├── INFRA/
+│   ├── INFRA.md         ← Living knowledge base for INFRA
 │   └── 88.md
 ```
 
