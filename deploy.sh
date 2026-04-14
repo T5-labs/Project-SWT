@@ -147,6 +147,6 @@ fi
 
 echo ""
 
-# Launch claude with Project-SWT added for CLAUDE.md discovery + file access
+# Launch claude with TPM identity loaded from CLAUDE.md + Project-SWT file access
 # cwd stays as the user's work repo
-exec claude --dangerously-skip-permissions --add-dir "$SWT_DIR"
+exec claude --dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system-prompt-file "$SWT_DIR/CLAUDE.md"
