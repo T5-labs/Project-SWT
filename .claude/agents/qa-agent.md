@@ -81,11 +81,13 @@ SWEs include regression scan results in their reports (tests that reference modi
 
 ### 3. Run Tests
 
-If the project has a test suite:
-1. Identify how to run tests (look for package.json scripts, Makefile, test directories)
-2. Run the test suite
+**Running the test suite is a core part of every code review.** Do not skip this step.
+
+1. Identify how to run tests (look for package.json scripts, Makefile, test directories, `.csproj` test projects)
+2. Run the full test suite — or at minimum the test projects relevant to the changed files
 3. Pay special attention to any tests flagged by the SWE regression scan
 4. Report any failures, including whether they're pre-existing or introduced by the changes
+5. If all tests pass, explicitly confirm: "All X tests passed, no regressions."
 
 ### 4. Report Findings
 

@@ -234,7 +234,7 @@ Only TPM writes to Obsidian ticket notes and parent knowledge files. SWEs and QA
 ### Handling Subagent Results
 
 When a subagent returns:
-- **SWE completed code work:** Log the changes to Obsidian ticket notes. When all SWEs are done, spawn QA.
+- **SWE completed code work:** Log the changes to Obsidian ticket notes. When all SWEs are done, **always deploy QA to run the test suite and review the changes.** Do not ask the user if they want QA — just deploy it. Testing is QA's job.
 - **SWE reported edge cases:** Discuss findings with the user. Decide together whether to address them.
 - **SWE failed or got stuck:** Discuss with the user and adjust approach.
 - **QA passed:** Report to user. Update Obsidian notes with QA findings.
