@@ -114,27 +114,27 @@ fi
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
 echo ""
-echo "┌─────────────────────────────────────────────────┐"
-echo "│  SWT (Software Team) v${VERSION}                      │"
-echo "├─────────────────────────────────────────────────┤"
-echo "│  TPM (orchestrator)           ${TPM_COUNT} session          │"
-echo "│  SWE cores (total)            ${SWE_AGENT_COUNT} agents           │"
-echo "│    ├─ Efficiency              ${SWE_EFFICIENCY_CORES} core             │"
-echo "│    └─ Performance             ${SWE_PERFORMANCE_CORES} cores            │"
-echo "│  QA (verifier)                ${QA_AGENT_COUNT} agent            │"
-echo "├─────────────────────────────────────────────────┤"
+echo "┌──────────────────────────────────────────────────────────────────────────────────────┐"
+echo "│  SWT (Software Team) v${VERSION}                                                           │"
+echo "├──────────────────────────────────────────────────────────────────────────────────────┤"
+echo "│  TPM (orchestrator)           ${TPM_COUNT} session                                           │"
+echo "│  SWE cores (total)            ${SWE_AGENT_COUNT} agents                                            │"
+echo "│    ├─ Efficiency              ${SWE_EFFICIENCY_CORES} core                                              │"
+echo "│    └─ Performance             ${SWE_PERFORMANCE_CORES} cores                                             │"
+echo "│  QA (verifier)                ${QA_AGENT_COUNT} agent                                             │"
+echo "├──────────────────────────────────────────────────────────────────────────────────────┤"
 
 if [ "$MODE" = "constrained" ]; then
-    echo "│  Mode: Constrained (ticket)                     │"
-    echo "│  Ticket: ${SWT_TICKET}                                  │"
+    printf "│  %-84s│\n" "Mode: Constrained (ticket)"
+    printf "│  %-84s│\n" "Ticket: ${SWT_TICKET}"
 else
-    echo "│  Mode: Unconstrained (ad-hoc)                   │"
+    printf "│  %-84s│\n" "Mode: Unconstrained (ad-hoc)"
 fi
 
-echo "│  Work dir:  ${WORK_DIR}"
-echo "│  Branch:    ${SWT_BRANCH}"
-echo "│  Obsidian:  ${OBSIDIAN_PATH:-not configured}"
-echo "└─────────────────────────────────────────────────┘"
+printf "│  %-84s│\n" "Work dir:  ${WORK_DIR}"
+printf "│  %-84s│\n" "Branch:    ${SWT_BRANCH}"
+printf "│  %-84s│\n" "Obsidian:  ${OBSIDIAN_PATH:-not configured}"
+echo "└──────────────────────────────────────────────────────────────────────────────────────┘"
 echo ""
 
 # ── Launch TPM ────────────────────────────────────────────────────
