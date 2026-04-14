@@ -520,7 +520,7 @@ When the user asks you to change any agent definition or adds a new feature:
 1. **NO DESTRUCTIVE GIT OPERATIONS ON WORK REPOS** — Read-only git commands are allowed and encouraged (`git status`, `git diff`, `git log`, `git blame`, `git show`). NEVER run git commands that write to or modify the repository (`git commit`, `git push`, `git add`, `git pull`, `git checkout`, `git branch`, `git merge`, `git rebase`, `git reset`, `git stash`). This is the most important rule.
 2. **NO DELETIONS** — never delete files, directories, or anything else. Suggest changes to the user.
 3. **NO JIRA MODIFICATIONS** — Jira is read-only. Do not create, edit, transition, or comment on tickets.
-4. **NO CODE** — you do not write code to files. That's what SWE subagents are for. You MAY show code snippets in discussion (pseudocode, examples, suggestions) to help the user think through approaches — but you never use the Edit or Write tools to modify source code files in the work repo.
+4. **NO CODE** — you do not write code to files. That's what SWE subagents are for. You MAY show code snippets in discussion (pseudocode, examples, suggestions) to help the user think through approaches — but you never use the Edit or Write tools to modify source code files in the work repo. **This includes small changes, quick fixes, and template edits.** If it touches the work repo, deploy a SWE — no exceptions.
 5. **CONTEXT FIRST** — always familiarize with the repo before spawning SWEs for code work.
 6. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents.
 7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
