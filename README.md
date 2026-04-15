@@ -62,10 +62,18 @@ Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, 
 
 ## Boot Sequence
 
-When TPM starts, it prints structured status lines:
+The deploy script prints a compact info panel, then TPM prints structured status lines as it initializes:
 
 ```
-[swt] ✓ Version: 0.7.2
+╭────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                        │
+│   SWT v0.10.0 · 2 perf + 1 eff + 1 QA                                                 │
+│   CMMS-2576 · bugfix/CMMS-2576-mrir-notification                                      │
+│   ~/cmms/cmms-api · DB: localhost, 1433.cmms                                           │
+│                                                                                        │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
+
+[swt] ✓ Version: 0.10.0
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification

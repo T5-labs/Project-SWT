@@ -135,37 +135,34 @@ fi
 export SWT_DB_CONNECTION
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
-echo ""
-echo "┌──────────────────────────────────────────────────────────────────────────────────────┐"
-echo "│  SWT (Software Team) v${VERSION}                                                           │"
-echo "├──────────────────────────────────────────────────────────────────────────────────────┤"
-echo "│  TPM (orchestrator)           ${TPM_COUNT} session                                           │"
-echo "│  SWE cores (total)            ${SWE_AGENT_COUNT} agents                                            │"
-echo "│    ├─ Efficiency              ${SWE_EFFICIENCY_CORES} core                                              │"
-echo "│    └─ Performance             ${SWE_PERFORMANCE_CORES} cores                                             │"
-echo "│  QA (verifier)                ${QA_AGENT_COUNT} agent                                             │"
-echo "├──────────────────────────────────────────────────────────────────────────────────────┤"
+DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
 
+INFO1="SWT v${VERSION} · ${SWE_PERFORMANCE_CORES} perf + ${SWE_EFFICIENCY_CORES} eff + ${QA_AGENT_COUNT} QA"
 if [ "$MODE" = "constrained" ]; then
-    printf "│  %-84s│\n" "Mode: Constrained (ticket)"
-    printf "│  %-84s│\n" "Ticket: ${SWT_TICKET}"
+    INFO2="${SWT_TICKET} · ${SWT_BRANCH}"
 else
-    printf "│  %-84s│\n" "Mode: Unconstrained (ad-hoc)"
+    INFO2="Unconstrained · ${SWT_BRANCH}"
+fi
+INFO3="${DISPLAY_DIR}"
+if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
+    INFO3="${INFO3} · DB: ${SWT_DB_CONNECTION}"
 fi
 
-printf "│  %-84s│\n" "Work dir:  ${WORK_DIR}"
-printf "│  %-84s│\n" "Branch:    ${SWT_BRANCH}"
-printf "│  %-84s│\n" "Obsidian:  ${OBSIDIAN_PATH:-not configured}"
-if [ "$SWT_DB_ENABLED" = "true" ]; then
-    if [ -n "$SWT_DB_CONNECTION" ]; then
-        printf "│  %-84s│\n" "Database:  ${SWT_DB_CONNECTION} (via LINQPad)"
-    else
-        printf "│  %-84s│\n" "Database:  enabled (no mapping for project)"
-    fi
-else
-    printf "│  %-84s│\n" "Database:  disabled"
-fi
-echo "└──────────────────────────────────────────────────────────────────────────────────────┘"
+# Truncate lines that exceed box width
+trunc() { local s="$1" m=85; [ ${#s} -gt $m ] && s="${s:0:$((m-3))}..."; echo "$s"; }
+INFO1=$(trunc "$INFO1")
+INFO2=$(trunc "$INFO2")
+INFO3=$(trunc "$INFO3")
+
+printf -v BORDER '%88s' ''; BORDER="${BORDER// /─}"
+echo ""
+echo "╭${BORDER}╮"
+printf "│%88s│\n" ""
+printf "│   %-85s│\n" "$INFO1"
+printf "│   %-85s│\n" "$INFO2"
+printf "│   %-85s│\n" "$INFO3"
+printf "│%88s│\n" ""
+echo "╰${BORDER}╯"
 echo ""
 
 # ── Launch TPM ────────────────────────────────────────────────────
