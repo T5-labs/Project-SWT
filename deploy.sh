@@ -137,22 +137,23 @@ export SWT_DB_CONNECTION
 # ── Boot Diagnostics ──────────────────────────────────────────────
 DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
 
-INFO1="SWT v${VERSION} · ${SWE_PERFORMANCE_CORES} perf + ${SWE_EFFICIENCY_CORES} eff + ${QA_AGENT_COUNT} QA"
+INFO1="SWT v${VERSION} | ${SWE_PERFORMANCE_CORES} perf + ${SWE_EFFICIENCY_CORES} eff + ${QA_AGENT_COUNT} QA"
 if [ "$MODE" = "constrained" ]; then
-    INFO2="${SWT_TICKET} · ${SWT_BRANCH}"
+    INFO2="${SWT_TICKET} | ${SWT_BRANCH}"
 else
-    INFO2="Unconstrained · ${SWT_BRANCH}"
+    INFO2="Unconstrained | ${SWT_BRANCH}"
 fi
 INFO3="${DISPLAY_DIR}"
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
-    INFO3="${INFO3} · DB: ${SWT_DB_CONNECTION}"
+    INFO3="${INFO3} | DB: ${SWT_DB_CONNECTION}"
 fi
 
-# Print a padded line inside the box (handles multi-byte chars like ·)
+# Print a padded line inside the box
 swt_line() {
-    local text="$1" max=85 vis=${#1}
+    local text="$1"
+    local vis=${#text} max=85
     if [ $vis -gt $max ]; then text="${text:0:$((max-3))}..."; vis=$max; fi
-    printf "│   %s%$((max - vis))s│\n" "$text" ""
+    printf "│   %-${max}s│\n" "$text"
 }
 
 REPO_URL="github.com/T5-labs/Project-SWT"
