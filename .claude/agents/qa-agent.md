@@ -26,7 +26,7 @@ TPM gives you everything you need when spawning you. Your assignment will be one
 - Testing procedures (pasted from the Obsidian ticket notes `## Testing Procedures` section)
 - Test output directory path (inside Project-SWT/tests/)
 - Tests root path (for shared playwright.config.ts)
-- Chrome profile path (for `launchPersistentContext` auth)
+- Edge profile path (for `launchPersistentContext` auth)
 - Auth and test data requirements
 - Ticket context
 
@@ -173,11 +173,11 @@ BASE_URL=http://localhost:4200 npx playwright test CMMS/5412/
 
 Report whether you created or reused the config in your return message.
 
-### 1.75. Auth — Chrome Browser Profile
+### 1.75. Auth — Edge Browser Profile
 
-The apps use Azure AD / MSAL. Rather than managing saved session files, tests use `chromium.launchPersistentContext` with the user's real Chrome browser profile. This reuses existing Azure AD cookies/tokens so no manual login step is needed.
+The apps use Azure AD / MSAL. Rather than managing saved session files, tests use `chromium.launchPersistentContext` with the user's real Microsoft Edge browser profile. This reuses existing Azure AD cookies/tokens so no manual login step is needed.
 
-TPM provides the Chrome profile path in your assignment (sourced from `swt.yml`). Use it in `test.beforeAll`:
+TPM provides the Edge profile path and headless setting in your assignment (sourced from `swt.yml`). Use them in `test.beforeAll`:
 
 ```typescript
 import { test, expect, chromium, Page, BrowserContext } from '@playwright/test';
@@ -186,10 +186,10 @@ let context: BrowserContext;
 let page: Page;
 
 test.beforeAll(async () => {
-  const userDataDir = '{chrome_profile_path from TPM assignment}';
+  const userDataDir = '{edge_profile_path from TPM assignment}';
   context = await chromium.launchPersistentContext(userDataDir, {
-    channel: 'chrome',
-    headless: false,  // Azure AD SSO may require a visible browser
+    channel: 'msedge',
+    headless: {true or false from TPM assignment},
   });
   page = context.pages()[0] || await context.newPage();
 });
@@ -200,10 +200,10 @@ test.afterAll(async () => {
 ```
 
 **Key rules:**
-- Always use `headless: false` — Azure AD token refresh may need a visible browser window
-- Always include a comment that Chrome must be closed before running tests
+- Use the `headless` value TPM provides (from `playwright_headless` in `swt.yml`). `false` = visible browser window, `true` = headless.
+- Always include a comment that Edge must be closed before running tests
 - Do NOT use `storageState` or `npx playwright open --save-storage` — the persistent context approach replaces that
-- The Chrome profile path comes from TPM's assignment — never hardcode or guess it
+- The Edge profile path and headless setting come from TPM's assignment — never hardcode or guess them
 
 ### 2. Set Up the Test File
 
@@ -213,7 +213,7 @@ Create the test spec in the directory TPM provided (inside Project-SWT/tests/):
 Project-SWT/tests/{PROJECT}/{NUMBER}/{project}-{number}.spec.ts
 ```
 
-Use this test structure (with Chrome profile auth):
+Use this test structure (with Edge profile auth):
 ```typescript
 import { test, expect, chromium, Page, BrowserContext } from '@playwright/test';
 
@@ -221,10 +221,10 @@ let context: BrowserContext;
 let page: Page;
 
 test.beforeAll(async () => {
-  const userDataDir = '{chrome_profile_path}';
+  const userDataDir = '{edge_profile_path}';
   context = await chromium.launchPersistentContext(userDataDir, {
-    channel: 'chrome',
-    headless: false,
+    channel: 'msedge',
+    headless: {playwright_headless},
   });
   page = context.pages()[0] || await context.newPage();
 });
@@ -259,8 +259,8 @@ For each TP in the testing procedures:
 - **One spec file per ticket** — all tests for a ticket go in one file
 - **Use `test.describe`** to group tests under the ticket ID
 - **Use meaningful selectors** — prefer `data-testid`, `role`, or `text` selectors over fragile CSS selectors
-- **Auth via Chrome profile** — always use `launchPersistentContext` with the Chrome profile path from TPM's assignment. Do not use `storageState` or session files.
-- **Include setup/teardown** — use `test.beforeAll` for auth (Chrome profile) and `test.beforeEach`/`test.afterEach` for test data
+- **Auth via Edge profile** — always use `launchPersistentContext` with the Edge profile path from TPM's assignment. Do not use `storageState` or session files.
+- **Include setup/teardown** — use `test.beforeAll` for auth (Edge profile) and `test.beforeEach`/`test.afterEach` for test data
 - **Keep tests independent** — each test should be able to run in isolation
 - **Comment the TP reference** — add a comment like `// TP-1` at the top of each test so it traces back to the procedure
 

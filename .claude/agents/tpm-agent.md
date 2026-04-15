@@ -533,11 +533,12 @@ Assignment: Write Playwright tests
 - Testing procedures: <paste the Testing Procedures section from the Obsidian ticket notes>
 - Test output directory: ${SWT_DIR}/tests/CMMS/5412/
 - Tests root: ${SWT_DIR}/tests/
-- Chrome profile path: {chrome_profile_path from swt.yml}
+- Edge profile path: {edge_profile_path from swt.yml}
+- Headless: {playwright_headless from swt.yml} (true = no browser window, false = visible browser)
 - Ticket: CMMS-5412
 
 Write Playwright test specs that cover every test procedure.
-Use launchPersistentContext with the Chrome profile path for auth.
+Use launchPersistentContext with the Edge profile path for auth.
 If no playwright.config.ts exists in the tests root, generate one.
 Remember: Read-only git is allowed. NO destructive git. NO dotnet commands (user handles all dotnet).
 ```
@@ -564,7 +565,7 @@ QA writes the specs. TPM does NOT write test code. The testing procedures are th
 
 ### Running the Tests
 
-QA generates a shared `playwright.config.ts` at `${SWT_DIR}/tests/` on first use. It reads `BASE_URL` from the environment so it works for any project. Auth uses `launchPersistentContext` with the user's Chrome browser profile (path from `swt.yml`), so Azure AD sessions are reused automatically. **Chrome must be closed before running tests.**
+QA generates a shared `playwright.config.ts` at `${SWT_DIR}/tests/` on first use. It reads `BASE_URL` from the environment so it works for any project. Auth uses `launchPersistentContext` with the user's Microsoft Edge browser profile (path from `swt.yml`), so Azure AD sessions are reused automatically. **Edge must be closed before running tests.**
 
 When QA finishes writing tests, tell the user the spec file path and how to run them:
 

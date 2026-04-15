@@ -12,10 +12,15 @@ qa_agent_count: 1           # Max concurrent QA subagents
 atlassian_cloud_id: "c636d04f-2517-4658-97ec-9f0e61f6ec55"
 atlassian_site: "herzog.atlassian.net"
 
-# Playwright Auth — Chrome browser profile path for launchPersistentContext
-# Tests reuse the user's existing Chrome session (Azure AD cookies, etc.)
-# Caveat: Chrome must be closed when running Playwright tests
-chrome_profile_path: "C:\\Users\\aarbuckle\\AppData\\Local\\Google\\Chrome\\User Data"
+# Playwright Configuration
+# Edge browser profile path for launchPersistentContext
+# Tests reuse the user's existing Edge session (Azure AD cookies, etc.)
+# Caveat: Edge must be closed when running Playwright tests
+edge_profile_path: "C:\\Users\\aarbuckle\\AppData\\Local\\Microsoft\\Edge\\User Data"
+
+# Set to true to run Playwright tests headless (no visible browser window)
+# Set to false to run headed (browser window visible — useful for debugging/watching tests)
+playwright_headless: false
 
 # Database Access (via LINQPad)
 # Set to false to disable all database access for agents
