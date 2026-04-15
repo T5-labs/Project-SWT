@@ -38,16 +38,88 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
    chmod +x ~/bin/swt
    ```
 
-3. Configure `.claude/config/swt.yml`:
-   - `obsidian_base_path` — path to your Obsidian vault (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`)
-   - `atlassian_cloud_id` — your Atlassian Cloud tenant ID (find via Atlassian admin or let TPM discover it on first boot)
-   - `atlassian_site` — your Atlassian site URL (e.g., `herzog.atlassian.net`)
+3. Configure `.claude/config/swt.yml` (see [Configuration](#configuration) below)
 
 ### Verify
 
 ```bash
 swt --help
 ```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `swt` | Unconstrained mode — general team, no ticket context |
+| `swt --branch` | Constrained mode — auto-detect ticket from git branch name |
+| `swt --CMMS-5412` | Constrained mode — manually specify a Jira ticket |
+| `swt --remote` | Enable Claude Code remote control (can combine with other flags) |
+| `swt --help` | Show usage help |
+
+**Examples:**
+
+```bash
+swt --branch                     # Detect ticket from branch, e.g. bugfix/CMMS-2576-fix → CMMS-2576
+swt --CMMS-5412                  # Work on CMMS-5412 regardless of branch
+swt --branch --remote            # Constrained + remote control
+swt --remote                     # Unconstrained + remote control
+```
+
+Only one ticket per session. Multiple ticket flags will error.
+
+## Configuration
+
+All configuration lives in `.claude/config/swt.yml`.
+
+### Obsidian
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `obsidian_base_path` | Path to your Obsidian vault where agent notes are stored | `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle` |
+
+### Atlassian / Jira
+
+| Setting | Description |
+|---------|-------------|
+| `atlassian_cloud_id` | Your Atlassian Cloud tenant ID. If not set, TPM discovers it on first boot via `getAccessibleAtlassianResources`. |
+| `atlassian_site` | Your Atlassian site URL (e.g., `herzog.atlassian.net`) |
+
+### Agent Team
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `swe_agent_count` | Total max concurrent SWE subagents | `3` |
+| `swe_performance_cores` | Performance SWE cores (primary workers) | `2` |
+| `swe_efficiency_cores` | Efficiency SWE cores (side tasks) | `1` |
+| `qa_agent_count` | Max concurrent QA subagents | `1` |
+
+### Playwright
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `edge_profile_path` | Path to Microsoft Edge user data directory. Tests use `launchPersistentContext` with this profile to reuse Azure AD sessions. Edge must be closed when running tests. | `C:\Users\aarbuckle\AppData\Local\Microsoft\Edge\User Data` |
+| `playwright_headless` | `true` = headless (no browser window), `false` = headed (visible browser, useful for debugging) | `false` |
+
+### Database Access (via LINQPad)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `database_enabled` | Global toggle for agent database access | `true` |
+| `lprun_path` | Path to LINQPad 8 CLI runner | `C:\Program Files\LINQPad8\LPRun8.exe` |
+| `databases` | Allowlist mapping Jira project keys to LINQPad connection names. Agents can only query connections in this list. | — |
+
+**Adding a database:**
+
+1. Create a connection in LINQPad 8 and note its exact name
+2. Add an entry under `databases:` with the project key and connection name:
+   ```yaml
+   databases:
+     - project: CMMS
+       connection: "localhost, 1433.cmms"
+   ```
+3. Restart your SWT session for changes to take effect
+
+Database access is **SELECT only** — INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC are forbidden.
 
 ## Team
 
@@ -56,7 +128,7 @@ swt --help
 | **TPM** | 1 (long-running) | Orchestrator, discussion partner, edge case hunter, generates testing procedures, writes all Obsidian notes |
 | **SWE (Performance)** | 2 (ephemeral) | Primary code work — core logic, complex tasks, critical path. Always deployed first. |
 | **SWE (Efficiency)** | 1 (ephemeral) | Tertiary support — side tasks when performance cores are busy. All hands for high-priority work. |
-| **QA** | 1 (ephemeral) | Two modes: code review (verifies SWE changes) and Playwright test writing (after AC is met) |
+| **QA** | 1 (ephemeral) | Two modes: code review (verifies SWE changes, reviews test files) and Playwright test writing (after AC is met) |
 
 Model assignment is by task difficulty (not role) — TPM decides Opus, Sonnet, or Haiku per agent.
 
@@ -67,7 +139,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.10.0                                 github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.14.0                                 github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -81,7 +153,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.10.0
+[swt] ✓ Version: 0.14.0
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
@@ -104,16 +176,16 @@ If any step fails, it prints an X and continues to the next step. If Jira is una
 3. **Preview (optional)** — For high-risk or large changes, TPM deploys SWEs in preview mode. SWEs plan changes and return a structured preview (files, scope, risks) without editing anything. User approves or adjusts before code is written.
 4. **Code** — TPM deploys SWEs with file ownership boundaries. SWEs write code with one-sentence explanations per change.
 5. **Regression scan** — SWEs grep test directories for references to modified code and flag potential risks
-6. **Review** — TPM deploys QA to verify all changes. QA cross-references SWE regression findings. Reports PASS/FAIL.
+6. **Review** — TPM deploys QA to verify all changes. QA reviews test files relevant to changed code, flags tests that need updating, and tells the user which test projects to run.
 7. **Pre-PR checklist** — TPM runs a CodeRabbit-aware checklist (unintended changes, secrets, dead code, null checks, etc.)
 8. **PR description** — TPM generates a two-sentence PR description for Bitbucket
 9. **Commit** — User handles all git operations (commit, push, branch)
 
 ### Testing Phase (after AC is met)
 
-1. **Generate testing procedures** — TPM and user collaboratively write test scenarios
+1. **Generate testing procedures** — TPM and user collaboratively write test scenarios, saved as a `## Testing Procedures` section in the Obsidian ticket notes
 2. **Approve** — User reviews and approves the procedures
-3. **Playwright tests** — TPM deploys QA to write Playwright specs based on the procedures. QA generates a shared `playwright.config.ts` at the tests root on first use (uses `BASE_URL` env var, works for any project).
+3. **Playwright tests** — TPM deploys QA to write Playwright specs based on the procedures. QA generates a shared `playwright.config.ts` at the tests root on first use (uses `BASE_URL` env var). Auth uses Edge browser profile via `launchPersistentContext`.
 4. **Tests saved** to `Project-SWT/tests/{PROJECT}/{NUMBER}/` (gitignored)
 
 ### Session End
@@ -135,12 +207,13 @@ When you wrap up, TPM writes a handoff summary to Obsidian notes (completed, in 
 ## Rules
 
 - **No destructive git** — Agents use read-only git (`status`, `diff`, `log`, `blame`, `show`) but NEVER write (`commit`, `push`, `add`, `checkout`, `branch`, `merge`, `reset`, `stash`, `pull`)
-- **No dotnet ef** — Agents never run database migration commands. Aware that `dotnet run`/`dotnet test` can trigger implicit migrations.
+- **No dotnet commands** — Agents never run any `dotnet` CLI commands (`run`, `test`, `build`, `restore`, `ef`). Only the user runs dotnet. If a build or test run is needed, agents report it.
 - **Protect .NET configs** — Never modify `appsettings.json` secrets/connection strings or `launchSettings.json` env values. Flag `.csproj`, `.sln`, and NuGet changes before proceeding.
 - **Jira is read-only** — Agents pull ticket context but never modify tickets
 - **No deletions** — Agents suggest removals, user executes
 - **Obsidian notes** — Only TPM writes to Obsidian; SWEs and QA report back to TPM
 - **File ownership** — Parallel SWEs are assigned non-overlapping file scopes to prevent conflicts
+- **Database is SELECT only** — Agents query via LINQPad but never modify data or schema
 
 ## Directory Structure
 
@@ -153,16 +226,15 @@ Project-SWT/
 ├── .gitignore                    # Ignores tests/
 ├── .claude/
 │   ├── config/
-│   │   └── swt.yml               # Obsidian path, core allocation, Atlassian config
+│   │   └── swt.yml               # All configuration (see Configuration section)
 │   ├── settings.json             # Permission settings
 │   └── agents/
 │       ├── tpm-agent.md          # TPM definition
 │       ├── swe-agent.md          # SWE definition
 │       └── qa-agent.md           # QA definition
-└── tests/                        # Gitignored — per-ticket Playwright tests
+└── tests/                        # Gitignored — Playwright specs only
     ├── playwright.config.ts      # QA (generated once, shared across projects)
     └── {PROJECT}/{NUMBER}/
-        ├── test-procedures.md    # Generated by TPM + user
         └── {project}-{number}.spec.ts  # Written by QA
 ```
 
@@ -177,7 +249,14 @@ Project-SWT/
 ```
 
 - **Parent file** (`CMMS/CMMS.md`) — architecture, conventions, gotchas. Agents read first, update with significant discoveries.
-- **Ticket notes** (`CMMS/5412.md`) — Jira summary, implementation notes, SWE changes, edge cases, QA findings, session handoff.
+- **Ticket notes** (`CMMS/5412.md`) — contains all per-ticket work:
+  - `## Ticket Summary` — pulled from Jira at start
+  - `## Implementation Notes` — discussion points, approach decisions
+  - `## Changes Made` — one-sentence explanations from SWEs
+  - `## Edge Cases` — discovered during development
+  - `## Testing Procedures` — written collaboratively by TPM + user
+  - `## QA Findings` — from QA review
+  - `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
 
 ## Modes
 
