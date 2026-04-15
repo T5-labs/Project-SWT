@@ -148,19 +148,26 @@ if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
     INFO3="${INFO3} · DB: ${SWT_DB_CONNECTION}"
 fi
 
-# Truncate lines that exceed box width
-trunc() { local s="$1" m=85; [ ${#s} -gt $m ] && s="${s:0:$((m-3))}..."; echo "$s"; }
-INFO1=$(trunc "$INFO1")
-INFO2=$(trunc "$INFO2")
-INFO3=$(trunc "$INFO3")
+# Print a padded line inside the box (handles multi-byte chars like ·)
+swt_line() {
+    local text="$1" max=85 vis=${#1}
+    if [ $vis -gt $max ]; then text="${text:0:$((max-3))}..."; vis=$max; fi
+    printf "│   %s%$((max - vis))s│\n" "$text" ""
+}
+
+REPO_URL="github.com/T5-labs/Project-SWT"
 
 printf -v BORDER '%88s' ''; BORDER="${BORDER// /─}"
 echo ""
 echo "╭${BORDER}╮"
 printf "│%88s│\n" ""
-printf "│   %-85s│\n" "$INFO1"
-printf "│   %-85s│\n" "$INFO2"
-printf "│   %-85s│\n" "$INFO3"
+# Title line: left-aligned name, right-aligned repo link
+TITLE="Project SWT"
+TITLE_PAD=$((85 - ${#TITLE} - ${#REPO_URL} - 1))
+printf "│   %s%${TITLE_PAD}s%s │\n" "$TITLE" "" "$REPO_URL"
+swt_line "$INFO1"
+swt_line "$INFO2"
+swt_line "$INFO3"
 printf "│%88s│\n" ""
 echo "╰${BORDER}╯"
 echo ""
