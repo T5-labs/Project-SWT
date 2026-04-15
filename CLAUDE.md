@@ -233,12 +233,14 @@ A living document about the project/repository. Contains:
 
 ### Ticket Notes ({PROJECT}/{NUMBER}.md)
 
-Per-ticket working notes. Contains:
-- Jira ticket summary (pulled at start)
-- Agent work log (what was done, by which agent)
-- Edge cases discovered
-- Implementation decisions and rationale
-- One-sentence change explanations from SWEs
+Per-ticket working notes. Sections:
+- `## Ticket Summary` — pulled from Jira at start
+- `## Implementation Notes` — discussion points, approach decisions
+- `## Changes Made` — one-sentence explanations from SWEs
+- `## Edge Cases` — discovered during development
+- `## Testing Procedures` — written collaboratively by TPM + user
+- `## QA Findings` — from QA review
+- `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
 
 ---
 
@@ -253,6 +255,7 @@ Agents interact with Jira via Atlassian MCP tools. Available operations:
 | `getJiraIssue` | Pull ticket description, status, assignee |
 | `searchJiraIssuesUsingJql` | Find related tickets |
 | `getJiraIssueTypeMetaWithFields` | Understand ticket structure |
+| `getAccessibleAtlassianResources` | Discover Atlassian cloud sites (fallback when cloud ID not in swt.yml) |
 
 Agents do NOT:
 - Create Jira tickets
@@ -301,10 +304,10 @@ These are non-negotiable and must be enforced in all agent definitions:
 6. **ONE-SENTENCE EXPLANATIONS** — every code change by an SWE must include a brief explanation of what the change does.
 7. **OBSIDIAN NOTES ARE LIVING DOCUMENTS** — TPM updates them as work progresses, not just at the end. Only TPM writes to Obsidian files — SWEs and QA report back to TPM who consolidates.
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
-9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents.
+9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
 10. **STAY IN CWD** — agents work in the user's current working directory. Do not navigate to other repos. (Exception: agents may read/write Obsidian notes and Project-SWT files as needed.)
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
-12. **NO DATABASE MIGRATION COMMANDS** — agents NEVER run `dotnet ef` migration commands (`dotnet ef database update`, `dotnet ef migrations add`, `dotnet ef migrations remove`, etc.) or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup** if the app is configured that way. Before running these commands, check with the user whether the app auto-migrates. If migrations are needed, agents report it to the user. The user handles all migrations.
+12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
 13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt.yml`.
 
 ---

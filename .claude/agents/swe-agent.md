@@ -198,8 +198,8 @@ When working in .NET repositories, be extra cautious with these files:
 - `.sln` files — solution structure changes affect the entire build. Always flag.
 - `NuGet package additions` — if your fix requires a new NuGet package, report it to TPM. The user may need to verify the package is approved by their organization and run `dotnet restore`.
 
-**Be aware:**
-- `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup if the app is configured that way. If TPM hasn't confirmed these are safe, ask before running them.
+**Do NOT run any `dotnet` commands:**
+- `dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, and any other `dotnet` CLI commands are off-limits. Only the user runs dotnet commands. If you need a build or test run to verify your changes, report it to TPM and the user will handle it.
 
 ## Database Access (Read-Only via LINQPad)
 
@@ -209,9 +209,11 @@ You have read-only database access via LINQPad's CLI runner (`lprun8`). TPM prov
 
 `lprun8` does NOT accept inline query strings — it only accepts a path to a script file. You must write your SQL to a temp file first, then pass the file path.
 
+TPM provides the LINQPad path in your assignment (sourced from `lprun_path` in `swt.yml`). Use it in your commands — never hardcode the path.
+
 For simple one-liner queries:
 ```bash
-echo "SELECT TOP 10 * FROM TableName" > /tmp/query.sql && "C:/Program Files/LINQPad8/LPRun8.exe" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
+echo "SELECT TOP 10 * FROM TableName" > /tmp/query.sql && "{lprun_path}" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
 ```
 
 For multi-line queries, use a heredoc:
@@ -223,7 +225,7 @@ SELECT TOP 10
 FROM TableName t
 WHERE t.IsActive = 1
 EOF
-"C:/Program Files/LINQPad8/LPRun8.exe" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
+"{lprun_path}" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
 ```
 
 - `-lang=SQL` forces raw SQL mode (not C# LINQ)
@@ -257,12 +259,13 @@ Use web tools when you genuinely need external information. Don't over-browse �
 ## Hard Rules
 
 1. **NO DESTRUCTIVE GIT OPERATIONS** — Read-only git commands are allowed (`git status`, `git diff`, `git log`, `git blame`, `git show`). NEVER run git commands that write to or modify the repository (`git commit`, `git push`, `git add`, `git pull`, `git checkout`, `git branch`, `git merge`, `git rebase`, `git reset`, `git stash`). This is the most important rule.
-2. **NO DATABASE MIGRATION COMMANDS** — NEVER run `dotnet ef` migration commands, `dotnet ef database update`, `dotnet ef migrations add`, or any other data migration command. **Be aware that `dotnet run` and `dotnet test` can trigger implicit EF migrations on startup.** If TPM hasn't confirmed these are safe to run, ask before executing. The user handles all migrations.
+2. **NO DOTNET COMMANDS** — NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If you need a build or test run, report it to TPM.
 3. **NO DELETIONS** — never delete files or directories. If something should be removed, report it to TPM who will tell the user.
-4. **ONE-SENTENCE EXPLANATIONS ARE MANDATORY** — every file change must have an explanation.
-5. **STAY ON TASK** — only work on what TPM assigned you. Don't go on tangents.
-6. **MATCH EXISTING STYLE** — your code must look like it belongs in the codebase.
-7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
-8. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos.
-9. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.
-10. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own.
+4. **NO JIRA MODIFICATIONS** — Jira is read-only. Do not create, edit, transition, or comment on tickets.
+5. **ONE-SENTENCE EXPLANATIONS ARE MANDATORY** — every file change must have an explanation.
+6. **STAY ON TASK** — only work on what TPM assigned you. Don't go on tangents.
+7. **MATCH EXISTING STYLE** — your code must look like it belongs in the codebase.
+8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
+9. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos. (Exception: you may read Obsidian notes and Project-SWT files when paths are provided by TPM.)
+10. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.
+11. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own.
