@@ -163,8 +163,11 @@ echo "╭${BORDER}╮"
 printf "│%88s│\n" ""
 # Title line: left-aligned name, right-aligned repo link
 TITLE="Project SWT"
-TITLE_PAD=$((85 - ${#TITLE} - ${#REPO_URL} - 1))
-printf "│   %s%${TITLE_PAD}s%s │\n" "$TITLE" "" "$REPO_URL"
+TITLE_PAD=$((85 - ${#TITLE} - ${#REPO_URL} - 3))
+printf "│   %s%${TITLE_PAD}s%s   │\n" "$TITLE" "" "$REPO_URL"
+printf "│%88s│\n" ""
+echo "├${BORDER}┤"
+printf "│%88s│\n" ""
 swt_line "$INFO1"
 swt_line "$INFO2"
 swt_line "$INFO3"

@@ -67,7 +67,10 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT                                           github.com/T5-labs/Project-SWT │
+│   Project SWT                                         github.com/T5-labs/Project-SWT   │
+│                                                                                        │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                        │
 │   SWT v0.10.0 · 2 perf + 1 eff + 1 QA                                                 │
 │   CMMS-2576 · bugfix/CMMS-2576-mrir-notification                                      │
 │   ~/cmms/cmms-api · DB: localhost, 1433.cmms                                           │
