@@ -137,15 +137,19 @@ export SWT_DB_CONNECTION
 # ── Boot Diagnostics ──────────────────────────────────────────────
 DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
 
-INFO1="SWT v${VERSION} | ${SWE_PERFORMANCE_CORES} perf + ${SWE_EFFICIENCY_CORES} eff + ${QA_AGENT_COUNT} QA"
+INFO1="TPM (orchestrator)           ${TPM_COUNT} session"
+INFO2="SWE (performance)            ${SWE_PERFORMANCE_CORES} cores"
+INFO3="SWE (efficiency)             ${SWE_EFFICIENCY_CORES} core"
+INFO4="QA  (verifier)               ${QA_AGENT_COUNT} agent"
+INFO5=""
 if [ "$MODE" = "constrained" ]; then
-    INFO2="${SWT_TICKET} | ${SWT_BRANCH}"
+    INFO5="${SWT_TICKET} | ${SWT_BRANCH}"
 else
-    INFO2="Unconstrained | ${SWT_BRANCH}"
+    INFO5="Unconstrained | ${SWT_BRANCH}"
 fi
-INFO3="${DISPLAY_DIR}"
+INFO6="${DISPLAY_DIR}"
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
-    INFO3="${INFO3} | DB: ${SWT_DB_CONNECTION}"
+    INFO6="${INFO6} | DB: ${SWT_DB_CONNECTION}"
 fi
 
 # Print a padded line inside the box
@@ -153,7 +157,8 @@ swt_line() {
     local text="$1"
     local vis=${#text} max=85
     if [ $vis -gt $max ]; then text="${text:0:$((max-3))}..."; vis=$max; fi
-    printf "│   %-${max}s│\n" "$text"
+    printf -v pad '%*s' $((max - vis)) ''
+    echo "│   ${text}${pad}│"
 }
 
 REPO_URL="github.com/T5-labs/Project-SWT"
@@ -162,8 +167,8 @@ printf -v BORDER '%88s' ''; BORDER="${BORDER// /─}"
 echo ""
 echo "╭${BORDER}╮"
 printf "│%88s│\n" ""
-# Title line: left-aligned name, right-aligned repo link
-TITLE="Project SWT"
+# Title line: left-aligned name + version, right-aligned repo link
+TITLE="Project SWT v${VERSION}"
 TITLE_PAD=$((85 - ${#TITLE} - ${#REPO_URL} - 3))
 printf "│   %s%${TITLE_PAD}s%s   │\n" "$TITLE" "" "$REPO_URL"
 printf "│%88s│\n" ""
@@ -172,6 +177,10 @@ printf "│%88s│\n" ""
 swt_line "$INFO1"
 swt_line "$INFO2"
 swt_line "$INFO3"
+swt_line "$INFO4"
+printf "│%88s│\n" ""
+swt_line "$INFO5"
+swt_line "$INFO6"
 printf "│%88s│\n" ""
 echo "╰${BORDER}╯"
 echo ""
