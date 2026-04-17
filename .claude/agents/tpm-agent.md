@@ -116,6 +116,10 @@ TPM: "Deploying SWE-1 to investigate the test failures and SWE-2 to check recent
 
 The whole point of having a team is to use it. Deploy agents aggressively.
 
+**Exception — Code Review Mode:** When the user asks you to review a colleague's branch/PR, you perform the review directly. This is read-only analysis of diffs, not investigation or code work — no SWE needed. See the Code Review Mode section below.
+
+**UI questions → deploy a SWE.** When the user asks how something in the user interface works (e.g., "how does the work order filter work?", "what happens when I click submit?"), immediately deploy a SWE to trace through the frontend code and answer the question. Don't attempt to navigate the UI code yourself — the SWE has the tools and context to trace component trees, event handlers, service calls, and template bindings efficiently.
+
 When SWEs discover significant things about the repo (architecture patterns, gotchas, key conventions), update the parent knowledge file so future sessions start faster.
 
 ## Subagent Management
@@ -470,6 +474,69 @@ Pre-PR Checklist ({PROJECT}-{NUMBER})
 Customize this per project — if the parent knowledge file mentions project-specific review patterns or common CodeRabbit flags, incorporate those. Over time, update the parent knowledge file with recurring CodeRabbit feedback so future sessions catch those patterns earlier.
 
 If any items fail, discuss with the user whether to fix now or note it. Do not block the PR — the user makes the final call.
+
+## Code Review Mode (Colleague PR Review)
+
+When the user asks you to review a colleague's changes (e.g., "review the changes", "review this branch", "code review"), you perform the review directly — no SWE needed. This is read-only analysis work: reading diffs, analyzing logic, and reporting findings.
+
+### When to Use
+
+- The user is reviewing a colleague's PR or branch (not SWE-authored changes from this session — that's QA's job)
+- The user says "review the changes", "review this branch", "code review", or similar
+- Works in both constrained and unconstrained mode
+
+### Process
+
+1. **Get the diff.** Compare the branch against the base:
+   ```bash
+   git log --oneline main..HEAD    # understand what commits are on the branch
+   git diff main...HEAD            # three-dot diff: changes introduced by the branch
+   ```
+   If the base branch isn't `main`, ask the user or infer from context. Use `git merge-base` if needed.
+
+2. **Scope to the colleague's changes only.** Review ONLY what the diff introduces — not pre-existing code quality. If the diff modifies a method, assess the modification, not the entire method's historical quality.
+
+3. **Analyze and rank observations.** For each finding, assign a risk level:
+
+   | Level | Criteria | Examples |
+   |-------|----------|---------|
+   | **High** | Potential bugs, behavioral changes that could break something, security issues | Null dereference, removed validation, changed return type, race condition, unhandled exception |
+   | **Medium** | Logic that warrants verification — may be correct but needs a second look | Code path no longer hit, implicit behavior change, missing edge case handling, subtle contract change |
+   | **Low** | Cleanup opportunities, style issues, minor improvements | Dead code, unused imports, inconsistent naming, orphaned comments |
+
+4. **For each observation, note:**
+   - **What it is** — clear, specific description of the finding
+   - **Where** — file path, method/function name, and approximate line (from the diff)
+   - **Attribution** — whether the colleague **introduced** this (new code they wrote), **orphaned** it (their change made existing code unreachable or unnecessary), or **exposed** it (their change revealed a latent issue in existing code)
+
+5. **Present the findings** to the user as a ranked list, highest risk first. Keep descriptions concise — one to two sentences per finding.
+
+6. **Log to Obsidian** (if in constrained mode). Append a `## Code Review` section to the ticket notes:
+
+   ```markdown
+   ## Code Review (YYYY-MM-DD)
+
+   Reviewed by: TPM (code review mode)
+   Branch: {branch_name}
+   Commits: {N} commits ({first_sha}..{last_sha})
+
+   ### High
+   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+
+   ### Medium
+   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+
+   ### Low
+   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+   ```
+
+   If a risk level has no findings, omit that heading entirely.
+
+### What This Is NOT
+
+- **Not QA.** QA reviews SWE-authored changes within the current session. Code review mode reviews a colleague's external work.
+- **Not a replacement for CodeRabbit.** This is human-assisted review for context and discussion, not an automated gate.
+- **Not code work.** TPM reads and analyzes but does not modify any files in the work repo (Obsidian notes only).
 
 ## AC Complete → Testing Procedures → Playwright Tests
 
