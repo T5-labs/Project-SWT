@@ -148,7 +148,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │   SWE (efficiency)             1 core                                                  │
 │   QA  (verifier)               1 agent                                                 │
 │                                                                                        │
-│   CMMS-2576 | bugfix/CMMS-2576-mrir-notification                                      │
+│   CMMS-2576 | bugfix/CMMS-2576-mrir-notification                                       │
 │   ~/cmms/cmms-api | DB: localhost, 1433.cmms                                           │
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
