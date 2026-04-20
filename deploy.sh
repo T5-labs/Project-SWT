@@ -270,7 +270,7 @@ fi
 export SWT_DB_CONNECTION
 
 # ── Resolve Board Config ────────────────────────────────────────
-SWT_BOARD_URL=$(grep 'board_url' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//')
+SWT_BOARD_URL=$(grep '^board_url' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//')
 export SWT_BOARD_URL
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
@@ -282,11 +282,12 @@ INFO1="TPM (orchestrator)           ${TPM_COUNT} session"
 INFO2="SWE (performance)            ${SWE_PERFORMANCE_CORES} cores"
 INFO3="SWE (efficiency)             ${SWE_EFFICIENCY_CORES} core"
 INFO4="QA  (verifier)               ${QA_AGENT_COUNT} agent"
+REPO_NAME="$(basename "$WORK_DIR")"
 INFO5=""
 if [ "$MODE" = "constrained" ]; then
-    INFO5="${SWT_TICKET} | ${SWT_BRANCH}"
+    INFO5="${REPO_NAME} | ${SWT_BRANCH} (${SWT_TICKET})"
 else
-    INFO5="Unconstrained | ${SWT_BRANCH}"
+    INFO5="${REPO_NAME} | ${SWT_BRANCH}"
 fi
 INFO6="${DISPLAY_DIR}"
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then

@@ -211,7 +211,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.18.2 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.18.3 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -220,7 +220,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │   SWE (efficiency)             1 core                                                  │
 │   QA  (verifier)               1 agent                                                 │
 │                                                                                        │
-│   CMMS-2576 | bugfix/CMMS-2576-mrir-notification                                       │
+│   cmms-api | bugfix/CMMS-2576-mrir-notification (CMMS-2576)                             │
 │   ~/cmms/cmms-api | DB: localhost, 1433.cmms                                           │
 │   Board: https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393         │
 │   Notes: ~/Documents/Obsidian/aarbuckle                                                │
