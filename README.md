@@ -63,10 +63,20 @@ If you prefer running SWT from WSL instead of Git Bash:
    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
    sudo apt-get install -y nodejs
    npm install -g @anthropic-ai/claude-code
-   claude auth login
    ```
 
-3. **Run setup** to install the `swt` launcher:
+3. **Authenticate Claude Code.** The OAuth login flow hangs in WSL because the browser callback can't reach the WSL environment. Instead of `claude auth login`, symlink your existing Windows credentials:
+   ```bash
+   mkdir -p ~/.claude
+   ln -sf /mnt/c/Users/aarbuckle/.claude/.credentials.json ~/.claude/.credentials.json
+   ```
+   Verify it worked:
+   ```bash
+   claude --version
+   ```
+   This shares auth between Git Bash and WSL — no separate login needed. If you don't have Claude Code authenticated on Windows yet, run `claude auth login` from Git Bash first, then create the symlink.
+
+4. **Run setup** to install the `swt` launcher:
 
    Find where your C: drive is mounted and run setup:
    ```bash
@@ -78,13 +88,14 @@ If you prefer running SWT from WSL instead of Git Bash:
 
    This creates `~/bin/swt` (a cross-platform launcher that works in both Git Bash and WSL), makes it executable, and adds `~/bin` to your PATH in `~/.bashrc` if needed.
 
-4. **Reload your shell and verify:**
+5. **Reload your shell and verify:**
    ```bash
    source ~/.bashrc
    swt --help
    ```
 
 **Notes:**
+- **Auth in WSL:** `claude auth login` hangs in WSL because the OAuth browser callback can't reach the WSL environment. The workaround is to symlink the Windows-side credentials file (step 3 above). If the credentials expire, re-authenticate from Git Bash and the symlink picks up the new token automatically.
 - WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
 - `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
 - The `--setup` launcher is cross-platform — if you run `--setup` from Git Bash, the same `~/bin/swt` file works in WSL too (and vice versa), since WSL inherits the Windows PATH.
