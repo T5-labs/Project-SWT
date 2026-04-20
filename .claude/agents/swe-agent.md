@@ -209,7 +209,7 @@ You have read-only database access via LINQPad's CLI runner (`lprun8`). TPM prov
 
 `lprun8` does NOT accept inline query strings — it only accepts a path to a script file. You must write your SQL to a temp file first, then pass the file path.
 
-TPM provides the LINQPad path in your assignment (sourced from `lprun_path` in `swt.yml`). Use it in your commands — never hardcode the path.
+TPM provides the LINQPad path in your assignment (pre-resolved for your platform). Use it in your commands — never hardcode the path.
 
 For simple one-liner queries:
 ```bash

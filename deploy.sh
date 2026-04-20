@@ -14,6 +14,24 @@
 
 set -e
 
+# ── Platform Detection ─────────────────────────────────────────────
+IS_WSL=false
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    IS_WSL=true
+fi
+export SWT_IS_WSL="$IS_WSL"
+
+# Convert a Windows-style path (e.g. C:/Users/...) to native platform format.
+# WSL: converts to /mnt/c/Users/...  Git Bash: passes through unchanged.
+to_native_path() {
+    local p="$1"
+    if [ "$IS_WSL" = true ] && [ -n "$p" ]; then
+        wslpath -u "$p" 2>/dev/null || echo "$p"
+    else
+        echo "$p"
+    fi
+}
+
 # ── Agent Team Configuration ───────────────────────────────────────
 export TPM_COUNT=1                # There can only be one TPM
 export SWE_AGENT_COUNT=3          # Total max concurrent SWE subagents
@@ -57,7 +75,7 @@ for arg in "$@"; do
             echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo ""
-            echo "Run from inside your work repo (Git Bash only)."
+            echo "Run from inside your work repo (Git Bash or WSL)."
             echo "Project-SWT: $SWT_DIR"
             exit 0
             ;;
@@ -111,7 +129,9 @@ for arg in "$@"; do
 done
 
 # ── Validate Obsidian Path ────────────────────────────────────────
-OBSIDIAN_PATH=$(grep 'obsidian_base_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+OBSIDIAN_PATH_RAW=$(grep 'obsidian_base_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+OBSIDIAN_PATH=$(to_native_path "$OBSIDIAN_PATH_RAW")
+export SWT_OBSIDIAN_PATH="$OBSIDIAN_PATH"
 if [ -n "$OBSIDIAN_PATH" ] && [ ! -d "$OBSIDIAN_PATH" ]; then
     echo "[swt] Warning: Obsidian base path does not exist: $OBSIDIAN_PATH"
     echo "[swt] Agents will create it on first use, or update .claude/config/swt.yml"
@@ -126,7 +146,13 @@ else
 fi
 
 LPRUN_RAW=$(grep 'lprun_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
-export SWT_LPRUN_PATH="$LPRUN_RAW"
+export SWT_LPRUN_PATH=$(to_native_path "$LPRUN_RAW")
+
+EDGE_PROFILE_RAW=$(grep 'edge_profile_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+export SWT_EDGE_PROFILE_PATH=$(to_native_path "$EDGE_PROFILE_RAW")
+
+SWT_PLAYWRIGHT_HEADLESS=$(grep 'playwright_headless' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *//')
+export SWT_PLAYWRIGHT_HEADLESS="${SWT_PLAYWRIGHT_HEADLESS:-false}"
 
 SWT_DB_CONNECTION=""
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_PROJECT" ]; then
@@ -136,6 +162,8 @@ export SWT_DB_CONNECTION
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
 DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
+
+if [ "$IS_WSL" = true ]; then PLATFORM="WSL"; else PLATFORM="Git Bash"; fi
 
 INFO1="TPM (orchestrator)           ${TPM_COUNT} session"
 INFO2="SWE (performance)            ${SWE_PERFORMANCE_CORES} cores"
@@ -168,8 +196,9 @@ echo ""
 echo "╭${BORDER}╮"
 printf "│%88s│\n" ""
 # Title line: left-aligned name + version, right-aligned repo link
-TITLE="Project SWT v${VERSION}"
+TITLE="Project SWT v${VERSION} (${PLATFORM})"
 TITLE_PAD=$((85 - ${#TITLE} - ${#REPO_URL} - 3))
+if [ $TITLE_PAD -lt 1 ]; then TITLE_PAD=1; fi
 printf "│   %s%${TITLE_PAD}s%s   │\n" "$TITLE" "" "$REPO_URL"
 printf "│%88s│\n" ""
 echo "├${BORDER}┤"
@@ -202,6 +231,16 @@ CLAUDE_ARGS=(--dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system
 if [ "$REMOTE" = true ]; then
     CLAUDE_ARGS+=(--remote-control)
     echo "[swt] Remote control enabled"
+fi
+
+if ! command -v claude &>/dev/null; then
+    echo "[swt] Error: 'claude' command not found."
+    if [ "$IS_WSL" = true ]; then
+        echo "[swt] Install in WSL: npm install -g @anthropic-ai/claude-code"
+    else
+        echo "[swt] Install: https://claude.ai/code"
+    fi
+    exit 1
 fi
 
 exec claude "${CLAUDE_ARGS[@]}"

@@ -177,7 +177,7 @@ Report whether you created or reused the config in your return message.
 
 The apps use Azure AD / MSAL. Rather than managing saved session files, tests use `chromium.launchPersistentContext` with the user's real Microsoft Edge browser profile. This reuses existing Azure AD cookies/tokens so no manual login step is needed.
 
-TPM provides the Edge profile path and headless setting in your assignment (sourced from `swt.yml`). Use them in `test.beforeAll`:
+TPM provides the Edge profile path and headless setting in your assignment (pre-resolved for your platform). Use them in `test.beforeAll`:
 
 ```typescript
 import { test, expect, chromium, Page, BrowserContext } from '@playwright/test';
@@ -200,7 +200,7 @@ test.afterAll(async () => {
 ```
 
 **Key rules:**
-- Use the `headless` value TPM provides (from `playwright_headless` in `swt.yml`). `false` = visible browser window, `true` = headless.
+- Use the `headless` value TPM provides in your assignment. `false` = visible browser window, `true` = headless.
 - Always include a comment that Edge must be closed before running tests
 - Do NOT use `storageState` or `npx playwright open --save-storage` — the persistent context approach replaces that
 - The Edge profile path and headless setting come from TPM's assignment — never hardcode or guess them

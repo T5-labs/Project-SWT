@@ -40,6 +40,42 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 
 3. Configure `.claude/config/swt.yml` (see [Configuration](#configuration) below)
 
+### WSL Setup
+
+If you prefer running SWT from WSL instead of Git Bash:
+
+1. Install Claude Code CLI in WSL:
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   claude auth login
+   ```
+
+2. Create the launcher (using the Windows-side clone via `/mnt/c`):
+   ```bash
+   mkdir -p ~/bin
+   echo '#!/bin/bash
+   exec /mnt/c/Users/aarbuckle/Project-SWT/deploy.sh "$@"' > ~/bin/swt
+   chmod +x ~/bin/swt
+   ```
+
+3. Ensure `~/bin` is on your PATH. Add to `~/.bashrc` if needed:
+   ```bash
+   export PATH="$HOME/bin:$PATH"
+   ```
+
+4. Reload your shell and verify:
+   ```bash
+   source ~/.bashrc
+   swt --help
+   ```
+
+**Notes:**
+- WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
+- `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to `/mnt/c/...` format
+- The `swt.yml` config file is shared between Git Bash and WSL — no separate config needed
+- LINQPad (Windows binary) works from WSL via Windows interop
+- Playwright in WSL may need additional setup to locate the Edge browser — test when writing specs
+
 ### Verify
 
 ```bash
@@ -139,7 +175,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.14.0                                 github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.16.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -153,7 +189,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.14.0
+[swt] ✓ Version: 0.16.0
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
@@ -206,7 +242,7 @@ When you wrap up, TPM writes a handoff summary to Obsidian notes (completed, in 
 
 ## Rules
 
-- **No destructive git** — Agents use read-only git (`status`, `diff`, `log`, `blame`, `show`) but NEVER write (`commit`, `push`, `add`, `checkout`, `branch`, `merge`, `reset`, `stash`, `pull`)
+- **No destructive git** — Agents use read-only git (`status`, `diff`, `log`, `blame`, `show`) but NEVER write (`commit`, `push`, `add`, `checkout`, `branch`, `merge`, `rebase`, `reset`, `stash`, `pull`)
 - **No dotnet commands** — Agents never run any `dotnet` CLI commands (`run`, `test`, `build`, `restore`, `ef`). Only the user runs dotnet. If a build or test run is needed, agents report it.
 - **Protect .NET configs** — Never modify `appsettings.json` secrets/connection strings or `launchSettings.json` env values. Flag `.csproj`, `.sln`, and NuGet changes before proceeding.
 - **Jira is read-only** — Agents pull ticket context but never modify tickets
