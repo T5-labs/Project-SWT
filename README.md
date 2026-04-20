@@ -58,14 +58,19 @@ If you prefer running SWT from WSL instead of Git Bash:
    wsl --set-default Ubuntu      # Set Ubuntu as default
    ```
 
-2. **Install Node.js and Claude Code CLI** in WSL:
+2. **Fix git safe.directory.** Windows-side repos appear as `root`-owned in WSL, so Git blocks them. Allow all repos (safe on a dev machine):
+   ```bash
+   git config --global --add safe.directory '*'
+   ```
+
+3. **Install Node.js and Claude Code CLI** in WSL:
    ```bash
    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
    sudo apt-get install -y nodejs
    npm install -g @anthropic-ai/claude-code
    ```
 
-3. **Authenticate Claude Code.** The OAuth login flow hangs in WSL because the browser callback can't reach the WSL environment. Instead of `claude auth login`, symlink your existing Windows credentials:
+4. **Authenticate Claude Code.** The OAuth login flow hangs in WSL because the browser callback can't reach the WSL environment. Instead of `claude auth login`, symlink your existing Windows credentials:
    ```bash
    mkdir -p ~/.claude
    ln -sf /mnt/c/Users/aarbuckle/.claude/.credentials.json ~/.claude/.credentials.json
@@ -76,7 +81,7 @@ If you prefer running SWT from WSL instead of Git Bash:
    ```
    This shares auth between Git Bash and WSL — no separate login needed. If you don't have Claude Code authenticated on Windows yet, run `claude auth login` from Git Bash first, then create the symlink.
 
-4. **Run setup** to install the `swt` launcher:
+5. **Run setup** to install the `swt` launcher:
 
    Find where your C: drive is mounted and run setup:
    ```bash
@@ -88,14 +93,14 @@ If you prefer running SWT from WSL instead of Git Bash:
 
    This creates `~/bin/swt` (a cross-platform launcher that works in both Git Bash and WSL), makes it executable, and adds `~/bin` to your PATH in `~/.bashrc` if needed.
 
-5. **Reload your shell and verify:**
+6. **Reload your shell and verify:**
    ```bash
    source ~/.bashrc
    swt --help
    ```
 
 **Notes:**
-- **Auth in WSL:** `claude auth login` hangs in WSL because the OAuth browser callback can't reach the WSL environment. The workaround is to symlink the Windows-side credentials file (step 3 above). If the credentials expire, re-authenticate from Git Bash and the symlink picks up the new token automatically.
+- **Auth in WSL:** `claude auth login` hangs in WSL because the OAuth browser callback can't reach the WSL environment. The workaround is to symlink the Windows-side credentials file (step 4 above). If the credentials expire, re-authenticate from Git Bash and the symlink picks up the new token automatically.
 - WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
 - `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
 - The `--setup` launcher is cross-platform — if you run `--setup` from Git Bash, the same `~/bin/swt` file works in WSL too (and vice versa), since WSL inherits the Windows PATH.
@@ -206,7 +211,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.18.1 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.18.2 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
