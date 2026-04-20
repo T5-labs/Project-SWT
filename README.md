@@ -2,6 +2,22 @@
 
 A multi-agent development team you deploy from any repo to collaboratively work on Jira tickets. Spring 2026.
 
+## Features
+
+- **Multi-agent orchestration** — TPM coordinates SWE and QA subagents with model selection by task difficulty (Opus / Sonnet / Haiku)
+- **Jira integration** — Pull tickets, query active sprints, search by status/assignee/priority via JQL
+- **Sprint & board queries** — Ask natural language questions about your sprint ("what's in progress?", "what's assigned to me?")
+- **Obsidian knowledge base** — Living project notes and per-ticket working docs that persist across sessions
+- **Multi-session continuity** — Handoff summaries let you pick up exactly where you left off
+- **Preview mode** — Dry-run code changes for review before any files are touched
+- **Code review mode** — TPM reviews colleague PRs directly with ranked findings (high/medium/low)
+- **QA verification** — Automated code review of SWE changes plus Playwright test generation
+- **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
+- **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
+- **Database access** — Read-only SQL queries via LINQPad for schema exploration and data inspection
+- **Cross-platform** — Works in both Git Bash and WSL with automatic path translation and a single shared launcher
+- **One-command setup** — `deploy.sh --setup` configures everything (launcher, PATH, platform detection)
+
 ## Quick Start
 
 ```bash
@@ -211,7 +227,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.18.3 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.19.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -227,7 +243,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.18.1
+[swt] ✓ Version: 0.19.0
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
@@ -298,6 +314,8 @@ Project-SWT/
 ├── VERSION                       # Current version
 ├── deploy.sh                     # The swt command
 ├── .gitignore                    # Ignores tests/
+├── scripts/
+│   └── clipboard-read.ps1       # Saves Windows clipboard image to temp file
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml               # All configuration (see Configuration section)

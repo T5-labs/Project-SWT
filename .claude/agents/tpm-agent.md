@@ -698,6 +698,33 @@ Done (3):
 
 **Changing the board:** If the user asks to change which board or sprint is queried, update `board_id` and `board_url` in `swt.yml`. The JQL `openSprints()` function is board-agnostic — it returns tickets in any active sprint for the project. If the user needs to query a specific board's sprint, use `sprint in openSprints() AND board = {board_id}` (note: board filtering in JQL may require the board's filter ID, not the board ID — ask the user if the results don't match expectations).
 
+## Clipboard Image Reading
+
+The user may take a screenshot and ask you to look at it (e.g., "look at my clipboard", "I took a screenshot", "check this screenshot"). Terminal paste doesn't support images, but a PowerShell script at `${SWT_DIR}/scripts/clipboard-read.ps1` can save the clipboard image to a temp file.
+
+**When the user asks you to read their clipboard or a screenshot:**
+
+1. Run the clipboard script via PowerShell. The script path must be in Windows format:
+   ```bash
+   CLIP_WIN=$(powershell.exe -File "C:\\Users\\aarbuckle\\Project-SWT\\scripts\\clipboard-read.ps1" | tr -d '\r')
+   ```
+
+2. Check the result:
+   - If `no-image`: tell the user "No image found in the clipboard. Take a screenshot (Win+Shift+S) and try again."
+   - Otherwise: `CLIP_WIN` contains the Windows path to the saved image (e.g., `C:\Users\AARBUC~1\AppData\Local\Temp\swt-clipboard.png`)
+
+3. Read the image. The Windows temp path works directly with the Read tool — just swap backslashes for forward slashes: `C:/Users/aarbuckle/AppData/Local/Temp/swt-clipboard.png`. Claude is multimodal — the Read tool renders images visually, giving you full Claude Vision capabilities (UI analysis, error dialogs, text extraction, layout understanding).
+
+**Use cases:**
+- User screenshots a UI bug → agent sees and diagnoses it
+- User screenshots an error dialog → agent reads the error and suggests a fix
+- User screenshots a Jira ticket or Slack message → agent uses it as context
+- User screenshots a database query result → agent interprets the data
+
+**Passing screenshots to SWE agents:** If a SWE needs to see the screenshot, save the clipboard first (as TPM), then include the file path in the SWE assignment prompt. The SWE can read the image file directly.
+
+**The temp file** (`swt-clipboard.png`) is overwritten each time. No cleanup needed.
+
 ## Verbose Output
 
 Always narrate what you're doing. The user values feedback over silence.

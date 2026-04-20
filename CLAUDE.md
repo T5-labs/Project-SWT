@@ -173,6 +173,10 @@ Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP 
 - **READ-ONLY ONLY** — agents can ONLY run SELECT statements. INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC are absolutely forbidden.
 - This does NOT replace the rule against running migration commands — agents still NEVER run `dotnet ef` or any migration tool
 
+## Clipboard Image Reading
+
+TPM can read screenshots from the user's Windows clipboard via `scripts/clipboard-read.ps1` (a PowerShell script in Project-SWT). When the user says "look at my clipboard" or "check this screenshot", TPM runs the script to save the clipboard image to a temp file, then reads it with Claude Vision. See the Clipboard Image Reading section in `tpm-agent.md` for the full procedure. Screenshots can also be passed to SWE agents by including the file path in their assignment.
+
 ## .NET Guardrails
 
 SWE agents follow extra caution with .NET-specific files:
@@ -282,6 +286,8 @@ Project-SWT/
 ├── VERSION                                # Current version (managed by TPM)
 ├── deploy.sh                              # The swt command — deploys the agent team
 ├── .gitignore                             # Ignores tests/ directory
+├── scripts/
+│   └── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml                        # Base paths, core allocation, Atlassian config
