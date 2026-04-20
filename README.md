@@ -16,9 +16,8 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 ### Prerequisites
 
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
-- Git Bash (comes with [Git for Windows](https://git-scm.com/download/win))
-- A `~/bin` directory on your PATH (create with `mkdir -p ~/bin`)
-- Set Git Bash path for Claude Code in `~/.bashrc`:
+- Git Bash (comes with [Git for Windows](https://git-scm.com/download/win)) or WSL
+- Set Git Bash path for Claude Code in `~/.bashrc` (Git Bash only — not needed for WSL):
   ```bash
   export CLAUDE_CODE_GIT_BASH_PATH="C:\Users\aarbuckle\AppData\Local\Programs\Git\bin\bash.exe"
   ```
@@ -30,9 +29,17 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
    git clone https://github.com/T5-labs/Project-SWT.git ~/Project-SWT
    ```
 
-2. Create the launcher in `~/bin`:
+2. Run setup to install the `swt` launcher:
 
    ```bash
+   ~/Project-SWT/deploy.sh --setup
+   ```
+
+   This creates `~/bin/swt`, makes it executable, and adds `~/bin` to your PATH in `~/.bashrc` if it isn't already there. Reload your shell after (`source ~/.bashrc`).
+
+   Alternatively, create the launcher manually:
+   ```bash
+   mkdir -p ~/bin
    echo '#!/bin/bash
    exec ~/Project-SWT/deploy.sh "$@"' > ~/bin/swt
    chmod +x ~/bin/swt
@@ -44,26 +51,34 @@ swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 
 If you prefer running SWT from WSL instead of Git Bash:
 
-1. Install Claude Code CLI in WSL:
+1. **Ensure you have a proper WSL distro** (Ubuntu recommended). If you have Docker Desktop installed, your default WSL distro may be `docker-desktop`, which is a minimal distro without bash or Node.js. Check and fix:
    ```bash
+   wsl --list --verbose          # See installed distros — * marks the default
+   wsl --install -d Ubuntu       # Install Ubuntu if not listed
+   wsl --set-default Ubuntu      # Set Ubuntu as default
+   ```
+
+2. **Install Node.js and Claude Code CLI** in WSL:
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+   sudo apt-get install -y nodejs
    npm install -g @anthropic-ai/claude-code
    claude auth login
    ```
 
-2. Create the launcher (using the Windows-side clone via `/mnt/c`):
+3. **Run setup** to install the `swt` launcher:
+
+   Find where your C: drive is mounted and run setup:
    ```bash
-   mkdir -p ~/bin
-   echo '#!/bin/bash
-   exec /mnt/c/Users/aarbuckle/Project-SWT/deploy.sh "$@"' > ~/bin/swt
-   chmod +x ~/bin/swt
+   # Standard mount point (most WSL distros):
+   /mnt/c/Users/aarbuckle/Project-SWT/deploy.sh --setup
+   # OR if your drives are at /mnt/host/c/:
+   /mnt/host/c/Users/aarbuckle/Project-SWT/deploy.sh --setup
    ```
 
-3. Ensure `~/bin` is on your PATH. Add to `~/.bashrc` if needed:
-   ```bash
-   export PATH="$HOME/bin:$PATH"
-   ```
+   This creates `~/bin/swt` (a cross-platform launcher that works in both Git Bash and WSL), makes it executable, and adds `~/bin` to your PATH in `~/.bashrc` if needed.
 
-4. Reload your shell and verify:
+4. **Reload your shell and verify:**
    ```bash
    source ~/.bashrc
    swt --help
@@ -71,7 +86,9 @@ If you prefer running SWT from WSL instead of Git Bash:
 
 **Notes:**
 - WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
-- `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to `/mnt/c/...` format
+- `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
+- The `--setup` launcher is cross-platform — if you run `--setup` from Git Bash, the same `~/bin/swt` file works in WSL too (and vice versa), since WSL inherits the Windows PATH.
+- WSL mount points vary by distro and configuration — `/mnt/c` is standard, but some setups (e.g., custom `/etc/wsl.conf`) mount drives at `/mnt/host/c` or elsewhere. Run `ls /mnt/` to see what's available.
 - The `swt.yml` config file is shared between Git Bash and WSL — no separate config needed
 - LINQPad (Windows binary) works from WSL via Windows interop
 - Playwright in WSL may need additional setup to locate the Edge browser — test when writing specs
@@ -90,6 +107,7 @@ swt --help
 | `swt --branch` | Constrained mode — auto-detect ticket from git branch name |
 | `swt --CMMS-5412` | Constrained mode — manually specify a Jira ticket |
 | `swt --remote` | Enable Claude Code remote control (can combine with other flags) |
+| `swt --setup` | Install the `swt` launcher into `~/bin` and add it to PATH |
 | `swt --help` | Show usage help |
 
 **Examples:**
@@ -175,7 +193,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.16.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.17.1 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -189,7 +207,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.16.0
+[swt] ✓ Version: 0.17.1
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification

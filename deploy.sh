@@ -9,8 +9,7 @@
 #
 # Install:
 #   See README.md for full setup. Quick version:
-#   1. Create ~/bin/swt with: exec ~/Project-SWT/deploy.sh "$@"
-#   2. chmod +x ~/bin/swt
+#   deploy.sh --setup       → creates ~/bin/swt launcher and updates PATH
 
 set -e
 
@@ -21,12 +20,49 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 fi
 export SWT_IS_WSL="$IS_WSL"
 
+# Detect where the C: drive is actually mounted in WSL (varies by distro/config).
+WSL_C_MOUNT=""
+if [ "$IS_WSL" = true ]; then
+    # Try wslpath first; strip trailing slash
+    _wslpath_result="$(wslpath -u 'C:\' 2>/dev/null | sed 's|/$||')"
+    if [ -n "$_wslpath_result" ] && [ -d "$_wslpath_result" ]; then
+        WSL_C_MOUNT="$_wslpath_result"
+    else
+        # Fallback: check known alternate mount points
+        for _candidate in /mnt/host/c /mnt/c; do
+            if [ -d "$_candidate" ]; then
+                WSL_C_MOUNT="$_candidate"
+                break
+            fi
+        done
+    fi
+fi
+
 # Convert a Windows-style path (e.g. C:/Users/...) to native platform format.
-# WSL: converts to /mnt/c/Users/...  Git Bash: passes through unchanged.
+# WSL: converts to /mnt/c/Users/... (or the detected mount point).
+# Git Bash: passes through unchanged.
 to_native_path() {
     local p="$1"
     if [ "$IS_WSL" = true ] && [ -n "$p" ]; then
-        wslpath -u "$p" 2>/dev/null || echo "$p"
+        # Try wslpath first
+        local converted
+        converted="$(wslpath -u "$p" 2>/dev/null)"
+        if [ -n "$converted" ]; then
+            # Verify the converted path's parent directory exists
+            local parent_dir
+            parent_dir="$(dirname "$converted")"
+            if [ -d "$parent_dir" ]; then
+                echo "$converted"
+                return
+            fi
+        fi
+        # Fallback: manual conversion using detected mount point
+        # Strip drive letter (C:/ or C:\) and prepend WSL mount
+        local stripped="${p#[A-Za-z]:/}"
+        stripped="${stripped#[A-Za-z]:\\}"
+        # Convert backslashes to forward slashes
+        stripped="${stripped//\\//}"
+        echo "${WSL_C_MOUNT}/${stripped}"
     else
         echo "$p"
     fi
@@ -74,9 +110,82 @@ for arg in "$@"; do
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo "  swt --remote           Enable remote control (can combine with other flags)"
+            echo "  swt --setup            Install the swt launcher into ~/bin and update PATH"
             echo ""
             echo "Run from inside your work repo (Git Bash or WSL)."
             echo "Project-SWT: $SWT_DIR"
+            exit 0
+            ;;
+        --setup)
+            echo "[swt] Running setup..."
+            LAUNCHER_DIR="$HOME/bin"
+            LAUNCHER_PATH="$LAUNCHER_DIR/swt"
+
+            # Compute WIN_SWT_DIR — Windows-format path with forward slashes
+            WIN_SWT_DIR=""
+            # Try Git Bash's pwd -W (returns C:/Users/... natively)
+            WIN_SWT_DIR="$(cd "$SWT_DIR" && pwd -W 2>/dev/null)" || true
+            if [ -z "$WIN_SWT_DIR" ]; then
+                # Try WSL wslpath
+                WIN_SWT_DIR="$(wslpath -w "$SWT_DIR" 2>/dev/null | tr '\\' '/')" || true
+            fi
+            if [ -z "$WIN_SWT_DIR" ]; then
+                # Fallback: use SWT_DIR as-is
+                WIN_SWT_DIR="$SWT_DIR"
+            fi
+
+            # Create ~/bin if it doesn't exist
+            if [ ! -d "$LAUNCHER_DIR" ]; then
+                mkdir -p "$LAUNCHER_DIR"
+                echo "[swt] Created $LAUNCHER_DIR"
+            fi
+
+            # Write the cross-platform launcher using a quoted heredoc (no expansion),
+            # then substitute the placeholder with the actual Windows-format path.
+            cat > "$LAUNCHER_PATH" <<'EOF'
+#!/bin/bash
+# SWT launcher — cross-platform (Git Bash + WSL)
+SWT_DIR_WIN="__SWT_DIR_WIN__"
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    SWT_DIR="$(wslpath -u "$SWT_DIR_WIN" 2>/dev/null)"
+    if [ ! -d "$SWT_DIR" ]; then
+        # Fallback for non-standard WSL mount points
+        DRIVE="${SWT_DIR_WIN%%:*}"
+        REST="${SWT_DIR_WIN#*:/}"
+        DRIVE_LOWER="$(echo "$DRIVE" | tr '[:upper:]' '[:lower:]')"
+        for prefix in /mnt/$DRIVE_LOWER /mnt/host/$DRIVE_LOWER; do
+            if [ -d "$prefix/$REST" ]; then
+                SWT_DIR="$prefix/$REST"
+                break
+            fi
+        done
+    fi
+else
+    SWT_DIR="$SWT_DIR_WIN"
+fi
+exec "$SWT_DIR/deploy.sh" "$@"
+EOF
+            sed -i "s|__SWT_DIR_WIN__|$WIN_SWT_DIR|" "$LAUNCHER_PATH"
+            chmod +x "$LAUNCHER_PATH"
+            echo "[swt] Launcher written to $LAUNCHER_PATH"
+
+            # Check if ~/bin is already on PATH
+            if echo ":$PATH:" | grep -q ":$LAUNCHER_DIR:"; then
+                echo "[swt] $LAUNCHER_DIR is already on your PATH"
+            else
+                # Detect shell rc file
+                if [ -n "$ZSH_VERSION" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+                    RC_FILE="$HOME/.zshrc"
+                else
+                    RC_FILE="$HOME/.bashrc"
+                fi
+                echo "" >> "$RC_FILE"
+                echo 'export PATH="$HOME/bin:$PATH"' >> "$RC_FILE"
+                echo "[swt] Added PATH entry to $RC_FILE"
+                echo "[swt] Run: source $RC_FILE  (or open a new terminal)"
+            fi
+
+            echo "[swt] Setup complete. Run: swt --help"
             exit 0
             ;;
         --remote)
@@ -236,9 +345,31 @@ fi
 if ! command -v claude &>/dev/null; then
     echo "[swt] Error: 'claude' command not found."
     if [ "$IS_WSL" = true ]; then
-        echo "[swt] Install in WSL: npm install -g @anthropic-ai/claude-code"
+        echo "[swt] Install Node.js and Claude Code in WSL:"
+        echo "[swt]   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -"
+        echo "[swt]   sudo apt-get install -y nodejs"
+        echo "[swt]   npm install -g @anthropic-ai/claude-code"
+        echo "[swt]   claude auth login"
     else
         echo "[swt] Install: https://claude.ai/code"
+    fi
+    exit 1
+fi
+
+# Verify claude actually runs (catches WSL finding Windows-side shim without node)
+if ! claude --version &>/dev/null; then
+    echo "[swt] Error: 'claude' was found at $(command -v claude) but failed to run."
+    if [ "$IS_WSL" = true ]; then
+        echo "[swt] WSL is likely finding the Windows Claude installation, but Node.js"
+        echo "[swt] is not installed natively in WSL."
+        echo "[swt]"
+        echo "[swt] Install Node.js and Claude Code in WSL:"
+        echo "[swt]   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -"
+        echo "[swt]   sudo apt-get install -y nodejs"
+        echo "[swt]   npm install -g @anthropic-ai/claude-code"
+        echo "[swt]   claude auth login"
+    else
+        echo "[swt] Try reinstalling: https://claude.ai/code"
     fi
     exit 1
 fi
