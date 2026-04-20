@@ -137,6 +137,8 @@ All configuration lives in `.claude/config/swt.yml`.
 |---------|-------------|
 | `atlassian_cloud_id` | Your Atlassian Cloud tenant ID. If not set, TPM discovers it on first boot via `getAccessibleAtlassianResources`. |
 | `atlassian_site` | Your Atlassian site URL (e.g., `herzog.atlassian.net`) |
+| `board_id` | Jira board ID for sprint queries (e.g., `393`). Found in your board URL. |
+| `board_url` | Full URL to your Jira board. Reference for TPM and easy to update if your board changes. |
 
 ### Agent Team
 
@@ -193,7 +195,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.17.1 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.18.1 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -204,10 +206,12 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 │   CMMS-2576 | bugfix/CMMS-2576-mrir-notification                                       │
 │   ~/cmms/cmms-api | DB: localhost, 1433.cmms                                           │
+│   Board: https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393         │
+│   Notes: ~/Documents/Obsidian/aarbuckle                                                │
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.17.1
+[swt] ✓ Version: 0.18.1
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification

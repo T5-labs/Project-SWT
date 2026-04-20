@@ -12,6 +12,12 @@ qa_agent_count: 1           # Max concurrent QA subagents
 atlassian_cloud_id: "c636d04f-2517-4658-97ec-9f0e61f6ec55"
 atlassian_site: "herzog.atlassian.net"
 
+# Jira Board Configuration
+# Board URL and ID for sprint queries. TPM uses JQL with openSprints() to query
+# the active sprint. Update the board_id and board_url if your board changes.
+board_id: 393
+board_url: "https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393"
+
 # Playwright Configuration
 # Edge browser profile path for launchPersistentContext
 # Tests reuse the user's existing Edge session (Azure AD cookies, etc.)

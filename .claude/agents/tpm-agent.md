@@ -646,6 +646,58 @@ cd ${SWT_DIR}/tests
 BASE_URL=http://localhost:4200 npx playwright test CMMS/5412/
 ```
 
+## Sprint & Board Queries
+
+The user's Jira board is configured in `swt.yml` (`board_id` and `board_url`). When the user asks about their sprint or board, use `searchJiraIssuesUsingJql` to query Jira and answer directly.
+
+**Configuration:** Read `board_id` and `board_url` from `swt.yml` during startup. The board URL is the user's reference — if they ask to change it, update `swt.yml`. The `board_id` is for context; JQL queries use sprint functions, not board IDs directly.
+
+**How to query:** Use `searchJiraIssuesUsingJql` with:
+- `cloudId`: the Atlassian cloud ID from `swt.yml`
+- `jql`: a JQL query using `sprint in openSprints()` scoped to the project
+- `fields`: `["summary", "status", "assignee", "priority", "issuetype", "sprint"]`
+- `responseContentFormat`: `"markdown"` for readable output
+- `maxResults`: adjust based on the query (10 for a quick look, 50 for full sprint)
+
+**Common JQL patterns:**
+
+| User asks | JQL |
+|-----------|-----|
+| "What's in the current sprint?" | `sprint in openSprints() AND project = {PROJECT} ORDER BY priority DESC` |
+| "What's in progress?" | `sprint in openSprints() AND project = {PROJECT} AND status = "In Progress"` |
+| "What's assigned to me?" | `sprint in openSprints() AND project = {PROJECT} AND assignee = currentUser()` |
+| "What's left to do?" | `sprint in openSprints() AND project = {PROJECT} AND status != "Done" ORDER BY priority DESC` |
+| "Show me blockers" | `sprint in openSprints() AND project = {PROJECT} AND priority = "Highest" AND status != "Done"` |
+| "What's done this sprint?" | `sprint in openSprints() AND project = {PROJECT} AND status = "Done"` |
+| "What's [person] working on?" | `sprint in openSprints() AND project = {PROJECT} AND assignee = "[name]"` |
+
+Replace `{PROJECT}` with the actual project key (e.g., `CMMS`). In constrained mode, use `SWT_PROJECT`. In unconstrained mode, ask the user which project or infer from context.
+
+**Presenting results:** Summarize the results concisely. For sprint overviews, use a table or grouped list by status. For specific queries, list the matching tickets with key, summary, status, and assignee. Always include the ticket key (e.g., CMMS-2578) so the user can reference it.
+
+**Example response format:**
+
+```
+Current sprint — 12 tickets:
+
+In Progress (4):
+  CMMS-2578  Invoice number sequencing        @aarbuckle
+  CMMS-2580  Fix asset filter on mobile       @jsmith
+  ...
+
+To Do (5):
+  CMMS-2590  Add bulk export for POs          @aarbuckle
+  ...
+
+Done (3):
+  CMMS-2575  Update notification templates    @jsmith
+  ...
+```
+
+**Adapting queries:** The user may ask freeform questions that don't map directly to the patterns above. Translate their intent into JQL. If unsure what fields or statuses to filter on, run a broad query first (`sprint in openSprints() AND project = {PROJECT}`) and use the results to refine.
+
+**Changing the board:** If the user asks to change which board or sprint is queried, update `board_id` and `board_url` in `swt.yml`. The JQL `openSprints()` function is board-agnostic — it returns tickets in any active sprint for the project. If the user needs to query a specific board's sprint, use `sprint in openSprints() AND board = {board_id}` (note: board filtering in JQL may require the board's filter ID, not the board ID — ask the user if the results don't match expectations).
+
 ## Verbose Output
 
 Always narrate what you're doing. The user values feedback over silence.

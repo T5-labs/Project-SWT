@@ -255,9 +255,13 @@ Agents interact with Jira via Atlassian MCP tools. Available operations:
 | Tool | Purpose |
 |------|---------|
 | `getJiraIssue` | Pull ticket description, status, assignee |
-| `searchJiraIssuesUsingJql` | Find related tickets |
+| `searchJiraIssuesUsingJql` | Find related tickets, query sprints, answer board questions |
 | `getJiraIssueTypeMetaWithFields` | Understand ticket structure |
 | `getAccessibleAtlassianResources` | Discover Atlassian cloud sites (fallback when cloud ID not in swt.yml) |
+
+### Sprint & Board Queries
+
+TPM can query the user's active sprint to answer questions like "what's in the current sprint?", "what's in progress?", or "what's assigned to me?". The board is configured in `swt.yml` (`board_id`, `board_url`). TPM uses JQL with `sprint in openSprints()` to query sprint data — see the Sprint & Board Queries section in `tpm-agent.md` for full details and JQL patterns.
 
 Agents do NOT:
 - Create Jira tickets

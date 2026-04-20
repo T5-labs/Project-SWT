@@ -269,6 +269,10 @@ if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_PROJECT" ]; then
 fi
 export SWT_DB_CONNECTION
 
+# ── Resolve Board Config ────────────────────────────────────────
+SWT_BOARD_URL=$(grep 'board_url' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//')
+export SWT_BOARD_URL
+
 # ── Boot Diagnostics ──────────────────────────────────────────────
 DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
 
@@ -287,7 +291,15 @@ fi
 INFO6="${DISPLAY_DIR}"
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
     INFO6="${INFO6} | DB: ${SWT_DB_CONNECTION}"
+elif [ "$SWT_DB_ENABLED" != "true" ]; then
+    INFO6="${INFO6} | DB: disabled"
 fi
+INFO7=""
+if [ -n "$SWT_BOARD_URL" ]; then
+    INFO7="Board: ${SWT_BOARD_URL}"
+fi
+DISPLAY_OBSIDIAN="${SWT_OBSIDIAN_PATH/#${HOME}/\~}"
+INFO8="Notes: ${DISPLAY_OBSIDIAN}"
 
 # Print a padded line inside the box
 swt_line() {
@@ -319,6 +331,10 @@ swt_line "$INFO4"
 printf "│%88s│\n" ""
 swt_line "$INFO5"
 swt_line "$INFO6"
+if [ -n "$INFO7" ]; then
+    swt_line "$INFO7"
+fi
+swt_line "$INFO8"
 printf "│%88s│\n" ""
 echo "╰${BORDER}╯"
 echo ""
