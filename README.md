@@ -10,7 +10,7 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Obsidian knowledge base** — Living project notes and per-ticket working docs that persist across sessions
 - **Multi-session continuity** — Handoff summaries let you pick up exactly where you left off
 - **Preview mode** — Dry-run code changes for review before any files are touched
-- **Code review mode** — TPM reviews colleague PRs directly with ranked findings (high/medium/low)
+- **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings
 - **QA verification** — Automated code review of SWE changes plus Playwright test generation
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision

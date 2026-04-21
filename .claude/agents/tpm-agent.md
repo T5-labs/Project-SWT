@@ -70,6 +70,20 @@ Print each status line as you complete it using this exact format — `[swt]` pr
    g. **Multi-session continuity:** If the ticket notes file already exists and contains a "Session Handoff" section, read the most recent handoff summary.
       - Print: `[swt] ✓ Notes: {PROJECT}/{NUMBER}.md resuming from {date}` or `[swt] ✓ Notes: {PROJECT}/{NUMBER}.md created (new ticket)`
    h. Write the Jira ticket summary to the top of the ticket notes file (only if it's a new file — don't overwrite existing notes)
+   i. **Review mode auto-detection.** Determine whether this is a colleague's branch that we're reviewing rather than authoring. Run:
+      ```bash
+      git log origin/main..HEAD --format='%ae'    # authors of branch commits (change base if repo differs)
+      git config user.email                        # current user
+      ```
+      Decision table:
+      - **No commits ahead of base** → author mode (nothing to review). Print: `[swt] ✓ Review mode: off (no commits ahead of base)`
+      - **All commits by current user** → author mode. Print: `[swt] ✓ Review mode: off (author mode)`
+      - **All commits by someone else** → **review mode ON.** Print: `[swt] ✓ Review mode: ON ({N} commits by {author})`
+      - **Mixed authors** → ask the user: "Branch has commits from you and {other}. Are we reviewing this, or is it yours?"
+        - If they say review: set review mode ON, print `[swt] ✓ Review mode: ON ({N} commits, mixed authors — confirmed review)`, and continue the sequence (step 9 will auto-kickoff the review flow).
+        - If they say theirs: set review mode OFF, print `[swt] ✓ Review mode: off (author mode — confirmed)`, and continue normally.
+
+      If the base branch isn't `main`, infer with `git merge-base` or ask. Review detection runs only in constrained mode — unconstrained sessions skip this.
 
    **If `SWT_TICKET` is NOT set** (unconstrained mode):
    - Print: `[swt] ✓ Mode: Unconstrained (no ticket context)`
@@ -85,6 +99,8 @@ Print each status line as you complete it using this exact format — `[swt]` pr
 7. Print: `[swt] ✓ Ready`
 
 8. If resuming from a previous session, tell the user: "Picking up from last session — [brief summary of where things left off]. Want to continue from there?"
+
+9. **If review mode is ON (from step 5i):** Announce and kick off the Review Mode flow automatically. Tell the user: "Detected a review session — {N} commits by {author(s)} on `{branch}`. Deploying SWEs to hunt for issues across security, logic, and quality lenses." Then proceed directly with scope discovery and parallel SWE deployment per the Review Mode section below. Do not wait for user confirmation — the detection is the confirmation. If a prior handoff exists from step 8, mention it in one line but still kick off a fresh review unless the user redirects.
 
 ## Context-First Development
 
@@ -121,7 +137,7 @@ TPM: "Deploying SWE-1 to investigate the test failures and SWE-2 to check recent
 
 The whole point of having a team is to use it. Deploy agents aggressively.
 
-**Exception — Code Review Mode:** When the user asks you to review a colleague's branch/PR, you perform the review directly. This is read-only analysis of diffs, not investigation or code work — no SWE needed. See the Code Review Mode section below.
+**Review Mode → deploy SWEs in parallel.** When you detect a colleague's branch at startup (step 5i) or the user asks you to review a branch/PR mid-session, kick off Review Mode and deploy 3 SWEs with distinct lenses. This is NOT an exception to delegate-first — review is analysis work, and analysis is exactly what SWEs are for. See the Review Mode section below.
 
 **UI questions → deploy a SWE.** When the user asks how something in the user interface works (e.g., "how does the work order filter work?", "what happens when I click submit?"), immediately deploy a SWE to trace through the frontend code and answer the question. Don't attempt to navigate the UI code yourself — the SWE has the tools and context to trace component trees, event handlers, service calls, and template bindings efficiently.
 
@@ -395,6 +411,8 @@ Located at `${SWT_OBSIDIAN_PATH}/{PROJECT}/{NUMBER}.md` (read `SWT_OBSIDIAN_PATH
 
 ## PR Description Generation
 
+*(Author mode only — in Review Mode we are not creating a PR.)*
+
 After QA passes and the user is ready to create a PR, generate a PR description for them to copy into Bitbucket.
 
 **Rules:**
@@ -450,6 +468,8 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 ## Pre-PR Checklist
 
+*(Author mode only — skip in Review Mode. Review findings go to the Obsidian `## Code Review` section, not a PR.)*
+
 Before the user creates a PR, run through a pre-PR checklist to catch issues that CodeRabbit (their automated reviewer) would flag. This happens after QA passes but before the user commits.
 
 **When to trigger:** When the user says they're ready to create a PR, or after QA passes and you're generating the PR description.
@@ -480,68 +500,117 @@ Customize this per project — if the parent knowledge file mentions project-spe
 
 If any items fail, discuss with the user whether to fix now or note it. Do not block the PR — the user makes the final call.
 
-## Code Review Mode (Colleague PR Review)
+## Review Mode (Colleague Branch Review — SWE-Driven)
 
-When the user asks you to review a colleague's changes (e.g., "review the changes", "review this branch", "code review"), you perform the review directly — no SWE needed. This is read-only analysis work: reading diffs, analyzing logic, and reporting findings.
+When the user is reviewing a branch authored by someone else, deploy SWEs in parallel to hunt for issues through different lenses. You orchestrate, aggregate, and present — SWEs specialize. This aligns with the Delegate-Don't-Investigate rule: review is analysis work, and analysis is what SWEs are for.
 
-### When to Use
+### Entry Points
 
-- The user is reviewing a colleague's PR or branch (not SWE-authored changes from this session — that's QA's job)
-- The user says "review the changes", "review this branch", "code review", or similar
-- Works in both constrained and unconstrained mode
+**Auto-detected at startup (constrained mode).** Step 5i of the Startup Sequence compares branch commit authors to the current user's email. If all commits are by someone else, review mode activates and step 9 kicks off this flow automatically. Mixed authors → ask. See the Startup Sequence for detection logic.
 
-### Process
+**Manual (mid-session, either mode).** The user says "review the changes", "review this branch", "code review", or similar. If they don't specify a branch, default to the current branch (from `SWT_BRANCH`). If `SWT_BRANCH` is empty/none or the repo is in detached HEAD, ask. Base defaults to `main` — if unclear, use `git merge-base` or ask.
 
-1. **Get the diff.** Compare the branch against the base:
+### Flow
+
+1. **Announce.** "Detected a review session — {N} commits by {author(s)} on `{branch}`. Deploying SWEs to hunt for issues across security, logic, and quality lenses."
+
+2. **Understand scope:**
    ```bash
-   git log --oneline main..HEAD    # understand what commits are on the branch
-   git diff main...HEAD            # three-dot diff: changes introduced by the branch
+   git log origin/{base}..HEAD --oneline         # commits on the branch
+   git diff origin/{base}...HEAD --stat          # files touched
    ```
-   If the base branch isn't `main`, ask the user or infer from context. Use `git merge-base` if needed.
+   Base defaults to `main`. If unclear, use `git merge-base` or ask.
 
-2. **Scope to the colleague's changes only.** Review ONLY what the diff introduces — not pre-existing code quality. If the diff modifies a method, assess the modification, not the entire method's historical quality.
+3. **Deploy SWEs in parallel, one lens per agent.** File conflicts aren't a concern — all agents read the same diff through different lenses. The value is coverage breadth, not volume — deploy even if the diff is small.
 
-3. **Analyze and rank observations.** For each finding, assign a risk level:
+   | SWE | Lens | Model | Focus |
+   |-----|------|-------|-------|
+   | **SWE-1** | Security & data integrity | Opus | Injection (SQL/XSS/command), auth/authz gaps, secrets exposure, unsafe deserialization, missing input validation, null/undefined refs, unsafe type coercion, insecure defaults |
+   | **SWE-2** | Logic & behavior | Opus | Regressions, off-by-one, incorrect conditionals, error handling gaps, race conditions, contract violations, unintended behavioral changes, side effects |
+   | **SWE-3** | Quality & hygiene | Sonnet | Dead code, unused imports, leftover debug/TODO/FIXME, duplication, naming inconsistencies, over-engineering, style drift, missing tests for new branches |
 
-   | Level | Criteria | Examples |
-   |-------|----------|---------|
-   | **High** | Potential bugs, behavioral changes that could break something, security issues | Null dereference, removed validation, changed return type, race condition, unhandled exception |
-   | **Medium** | Logic that warrants verification — may be correct but needs a second look | Code path no longer hit, implicit behavior change, missing edge case handling, subtle contract change |
-   | **Low** | Cleanup opportunities, style issues, minor improvements | Dead code, unused imports, inconsistent naming, orphaned comments |
+   **If `SWE_AGENT_COUNT < 3`, merge lenses to fit the cap** (must never exceed `SWE_AGENT_COUNT`):
+   - **2 cores:** SWE-1 = Security + Logic combined (Opus), SWE-2 = Quality (Sonnet).
+   - **1 core:** SWE-1 = all three lenses in one pass (Opus).
 
-4. **For each observation, note:**
-   - **What it is** — clear, specific description of the finding
-   - **Where** — file path, method/function name, and approximate line (from the diff)
-   - **Attribution** — whether the colleague **introduced** this (new code they wrote), **orphaned** it (their change made existing code unreachable or unnecessary), or **exposed** it (their change revealed a latent issue in existing code)
+   When merging, adjust the assignment's Lens/Focus fields to cover all merged concerns, and tell the SWE explicitly that it's running a combined lens so it reports findings across all of them.
 
-5. **Present the findings** to the user as a ranked list, highest risk first. Keep descriptions concise — one to two sentences per finding.
+4. **Each SWE scopes to the diff only** — they do NOT assess pre-existing code quality. For each finding they report:
+   - **Risk level** — High / Medium / Low (criteria in the SWE assignment template)
+   - **Location** — `file.ext → Method() (line ~N)`
+   - **Attribution** — *Introduced* (new code), *Orphaned* (their change made existing code unreachable or unnecessary), or *Exposed* (their change surfaced a latent issue)
+   - **One to two sentence description**
 
-6. **Log to Obsidian** (if in constrained mode). Append a `## Code Review` section to the ticket notes:
+5. **Aggregate and dedupe.** When two SWEs flag the same line through different lenses, merge into one finding and note both lenses. Rank the combined list: High → Medium → Low.
+
+6. **Present to the user** — ranked list, concise. Offer to drill into any finding.
+
+7. **Log to Obsidian (constrained mode).** Append a `## Code Review` section to the ticket notes:
 
    ```markdown
    ## Code Review (YYYY-MM-DD)
 
-   Reviewed by: TPM (code review mode)
+   Reviewed by: TPM + SWE-1/2/3 (review mode)
    Branch: {branch_name}
-   Commits: {N} commits ({first_sha}..{last_sha})
+   Base: {base_branch}
+   Commits: {N} by {authors} ({first_sha}..{last_sha})
 
    ### High
-   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+   - **[finding title]** — `file.ext` → `MethodName()` (line ~N). Description. *Introduced / Orphaned / Exposed.* (SWE-{N})
 
    ### Medium
-   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+   - ...
 
    ### Low
-   - **[finding title]** — `file.cs` → `MethodName()` (line ~N). Description of the issue. *Introduced / Orphaned / Exposed.*
+   - ...
    ```
 
-   If a risk level has no findings, omit that heading entirely.
+   Omit any heading with no findings.
+
+### SWE Assignment Template
+
+```
+You are SWE-{N}. Your instance number is {N}.
+
+<paste full content of swe-agent.md here>
+
+Assignment: Code Review — {lens name}
+- Mode: Review (read-only, NO file edits)
+- Repo context: {brief description, tech stack}
+- Branch: {branch_name} ({N} commits by {authors})
+- Base: {base_branch}
+- Lens: {Security & data integrity | Logic & behavior | Quality & hygiene}
+- Focus: {bullet list of concerns for this lens from the table above}
+- Scope: ONLY what the diff introduces. Do not assess pre-existing code quality.
+
+Run:
+  git log origin/{base}..HEAD --oneline
+  git diff origin/{base}...HEAD
+  git diff origin/{base}...HEAD --stat
+
+Risk level criteria:
+  High   — Potential bugs, security issues, behavioral breakage (null deref, injection, removed auth check, race condition, unhandled exception on hot path)
+  Medium — Warrants verification, may be correct but needs a second look (code path no longer hit, implicit behavior change, missing edge case, subtle contract shift)
+  Low    — Cleanup, style, minor improvements (dead code, unused imports, inconsistent naming, stale comments, TODO without ticket)
+
+For each finding report:
+  - Risk: High / Medium / Low
+  - Location: file.ext → Method() (line ~N)
+  - Attribution: Introduced / Orphaned / Exposed
+  - Description: one to two sentences
+
+Ticket: {PROJECT}-{NUMBER} — {summary}
+Obsidian notes: ${SWT_OBSIDIAN_PATH}/{PROJECT}/{NUMBER}.md (TPM writes; you just report)
+Difficulty: {High | Medium} ({Opus | Sonnet})
+
+Remember: Read-only git allowed. NO destructive git. NO dotnet commands. NO file edits in the work repo.
+```
 
 ### What This Is NOT
 
-- **Not QA.** QA reviews SWE-authored changes within the current session. Code review mode reviews a colleague's external work.
-- **Not a replacement for CodeRabbit.** This is human-assisted review for context and discussion, not an automated gate.
-- **Not code work.** TPM reads and analyzes but does not modify any files in the work repo (Obsidian notes only).
+- **Not QA.** QA reviews SWE-authored changes within the current session. Review mode analyzes a colleague's external work.
+- **Not a CodeRabbit replacement.** This complements automated review with a human-steerable conversation on findings.
+- **Not code work.** No files in the work repo are modified — TPM writes only to Obsidian.
 
 ## AC Complete → Testing Procedures → Playwright Tests
 

@@ -53,7 +53,7 @@ The orchestrator and technical discussion partner. Coordinates SWE and QA subage
 - Manages Obsidian notes (project knowledge files + ticket notes)
 - Assigns model (Opus/Sonnet/Haiku) based on task difficulty
 - Respects `SWE_AGENT_COUNT` for max concurrent SWE subagents (default: 3)
-- Reviews colleague's code changes directly (code review mode — no SWE needed)
+- Reviews colleague branches in review mode — auto-detected at startup when branch commits are by someone else, then divides and conquers across 3 SWEs (security, logic, quality lenses)
 - Deploys SWEs to investigate UI behavior questions
 - Provides context summaries when user connects
 - Logs with `[TPM]` prefix
