@@ -364,4 +364,4 @@ if ! claude --version &>/dev/null; then
     exit 1
 fi
 
-exec claude "${CLAUDE_ARGS[@]}"
+exec claude "${CLAUDE_ARGS[@]}" "initiate"
