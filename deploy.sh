@@ -5,7 +5,6 @@
 # Usage:
 #   swt                      → unconstrained mode (general team, no ticket context)
 #   swt --branch             → constrained mode (auto-detect ticket from git branch)
-#   swt --CMMS-5412          → constrained mode (manually specify Jira ticket)
 #
 # Install:
 #   See README.md for full setup. Quick version:
@@ -100,7 +99,6 @@ SWT_NUMBER=""
 MODE="unconstrained"
 REMOTE=false
 
-TICKET_COUNT=0
 for arg in "$@"; do
     case "$arg" in
         --help|-h)
@@ -108,7 +106,6 @@ for arg in "$@"; do
             echo ""
             echo "  swt                    Unconstrained mode (general team, no ticket context)"
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
-            echo "  swt --CMMS-5412        Constrained mode (manually specify ticket)"
             echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo "  swt --setup            Install the swt launcher into ~/bin and update PATH"
             echo ""
@@ -207,30 +204,6 @@ EOF
             else
                 echo "[swt] Could not detect ticket from branch: $SWT_BRANCH"
                 echo "[swt] Expected branch format: PROJECT-NUMBER-description (e.g., CMMS-2563-add-login)"
-                exit 1
-            fi
-            ;;
-        --*)
-            # Parse --PROJECT-NUMBER (e.g., --CMMS-5412)
-            TICKET="${arg#--}"
-            if [[ "$TICKET" =~ ^([A-Za-z]+)-([0-9]+)$ ]]; then
-                TICKET_COUNT=$((TICKET_COUNT + 1))
-                if [ "$TICKET_COUNT" -gt 1 ]; then
-                    echo "[swt] Error: only one ticket per session."
-                    echo "[swt] Got multiple ticket arguments. Run separate sessions for each ticket."
-                    exit 1
-                fi
-                # Normalize project name to uppercase for consistent Obsidian folders
-                SWT_PROJECT=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
-                SWT_NUMBER="${BASH_REMATCH[2]}"
-                SWT_TICKET="${SWT_PROJECT}-${SWT_NUMBER}"
-                MODE="constrained"
-                export SWT_TICKET
-                export SWT_PROJECT
-                export SWT_NUMBER
-            else
-                echo "[swt] Invalid ticket format: $arg"
-                echo "[swt] Expected: --PROJECT-NUMBER (e.g., --CMMS-5412)"
                 exit 1
             fi
             ;;
@@ -342,7 +315,7 @@ echo ""
 
 # ── Launch TPM ────────────────────────────────────────────────────
 echo "[swt] Starting TPM v${VERSION} in CLI mode..."
-echo "[swt] Work directory: $WORK_DIR"
+echo "[swt] Work repo: $WORK_DIR"
 
 if [ "$MODE" = "constrained" ]; then
     echo "[swt] Ticket: $SWT_TICKET (project=$SWT_PROJECT, number=$SWT_NUMBER)"

@@ -283,5 +283,5 @@ Report back to TPM with:
 7. **NO DATABASE ACCESS** — QA does not query databases. If you need data state verified, report it to TPM who will deploy a SWE with database access.
 8. **STAY ON TASK** — only review what TPM assigned you.
 9. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
-10. **STAY IN CWD** — work in the user's current working directory. Do not navigate to other repos. (Exception: you may read Obsidian notes and write Playwright tests to the Project-SWT tests directory when assigned by TPM.)
+10. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read Obsidian notes and write Playwright tests to the Project-SWT tests directory when assigned by TPM. (b) TPM may provide a different work directory in your assignment when the user has verbally redirected the session — review and test in that path normally.
 11. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.

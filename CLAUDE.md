@@ -14,6 +14,7 @@ A hybrid development agent team for professional Jira-based software work. A TPM
 
 - **Hybrid development** — agents are collaborative partners, not task executors. They discuss implementation, suggest approaches, and identify edge cases alongside the user.
 - **Context-first** — agents deeply familiarize themselves with the repo before writing any code. Read, understand, then act.
+- **Work repo binding** — when TPM initiates, the current working directory IS the work repo for the session. Agents are bound to this cwd. The user may verbally redirect mid-session to a different path, at which point that path becomes the work repo and agents read/write there freely.
 - **No destructive git operations on work repos** — agents may use read-only git commands (`git status`, `git diff`, `git log`, `git blame`, `git show`) but NEVER write to the repo (`git commit`, `git push`, `git add`, `git checkout`, `git branch`, `git merge`, `git rebase`, `git reset`, `git stash`, `git pull`). The user handles all Bitbucket/git write operations.
 - **No deletions** — agents cannot delete files, branches, or anything else. Suggest changes only.
 - **One-sentence explanations** — when SWEs write code, every change comes with a simple one-sentence explanation of what it does.
@@ -29,7 +30,7 @@ A hybrid development agent team for professional Jira-based software work. A TPM
 ```
 User's Work Repo (cwd)
 ├── TPM (orchestrator, this CLI session)
-│   ├── spawns SWE subagents (ephemeral)     ← code work, preview mode, edge case hunting
+│   ├── spawns SWE subagents (ephemeral)     ← code work, preview mode, edge case hunting, review/planning lenses
 │   └── spawns QA subagent (ephemeral)       ← code verification
 ├── Jira (via Atlassian MCP)
 │   └── Ticket descriptions, context
@@ -54,6 +55,7 @@ The orchestrator and technical discussion partner. Coordinates SWE and QA subage
 - Assigns model (Opus/Sonnet/Haiku) based on task difficulty
 - Respects `SWE_AGENT_COUNT` for max concurrent SWE subagents (default: 3)
 - Reviews colleague branches in review mode — auto-detected at startup when branch commits are by someone else, then divides and conquers across 3 SWEs (security, logic, quality lenses)
+- Plans fresh tickets in planning mode — auto-detected at startup when the branch has 0 commits, then divides and conquers across 3 SWEs (architecture, implementation, test-strategy lenses) scoped to the Jira AC
 - Deploys SWEs to investigate UI behavior questions
 - Provides context summaries when user connects
 - Logs with `[TPM]` prefix
@@ -95,12 +97,19 @@ Does NOT: write feature code in the work repo, run destructive git commands, del
 **The entire session is scoped to the specified ticket.** All discussion, code work, and notes stay in the context of that ticket until the session ends.
 
 ```
-User runs: swt --branch  OR  swt --CMMS-5412
+User runs: swt --branch
   → TPM resolves Atlassian cloud ID from swt.yml (or discovers via MCP)
   → TPM pulls Jira ticket via getJiraIssue("CMMS-5412")
   → TPM reads/creates CMMS/CMMS.md (project knowledge) in Obsidian
   → TPM reads/creates CMMS/5412.md (ticket notes) in Obsidian
   → TPM familiarizes with the repo (user's cwd)
+  → If branch has 0 commits ahead of base: planning mode auto-kicks
+    → TPM deploys 3 SWEs (architecture/implementation/test-strategy lenses) scoped to Jira AC
+    → SWEs return plan fragments (read-only, no code)
+    → TPM aggregates into ## Implementation Plan section in Obsidian notes
+    → User reviews plan, then work proceeds to discussion/code phase
+  → Else if branch has commits by someone else: review mode auto-kicks (see Review Mode)
+  → Else: normal development flow (discuss → code → QA → etc.)
   → User and TPM discuss implementation approach
   → TPM spawns SWE subagents for code work / edge case hunting
     → SWEs write code with one-sentence explanations
@@ -241,12 +250,16 @@ A living document about the project/repository. Contains:
 
 Per-ticket working notes. Sections:
 - `## Ticket Summary` — pulled from Jira at start
+- `## Implementation Plan` — aggregated from planning-mode SWEs (architecture/implementation/test-strategy)
 - `## Implementation Notes` — discussion points, approach decisions
 - `## Changes Made` — one-sentence explanations from SWEs
 - `## Edge Cases` — discovered during development
 - `## Testing Procedures` — written collaboratively by TPM + user
 - `## QA Findings` — from QA review
+- `## Branch Review` — findings from review-mode SWEs (security/logic/quality)
 - `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
+
+Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions.
 
 ---
 
@@ -317,7 +330,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 7. **OBSIDIAN NOTES ARE LIVING DOCUMENTS** — TPM updates them as work progresses, not just at the end. Only TPM writes to Obsidian files — SWEs and QA report back to TPM who consolidates.
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
-10. **STAY IN CWD** — agents work in the user's current working directory. Do not navigate to other repos. (Exception: agents may read/write Obsidian notes and Project-SWT files as needed.)
+10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd.
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
 13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt.yml`.

@@ -11,6 +11,7 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Multi-session continuity** — Handoff summaries let you pick up exactly where you left off
 - **Preview mode** — Dry-run code changes for review before any files are touched
 - **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings
+- **Fresh Branch Planning** — Auto-detects zero-commit branches on `swt --branch` and deploys 3 SWEs in parallel (architecture, implementation, test-strategy lenses) to plan the ticket from its Jira AC, with the plan logged to Obsidian notes
 - **QA verification** — Automated code review of SWE changes plus Playwright test generation
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
@@ -24,7 +25,6 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 # cd into your work repo first, then:
 swt                    # Unconstrained — general team, no ticket context
 swt --branch           # Constrained — auto-detects ticket from git branch name
-swt --CMMS-5412        # Constrained — manually specify a Jira ticket
 ```
 
 ## Setup
@@ -137,7 +137,6 @@ swt --help
 |---------|-------------|
 | `swt` | Unconstrained mode — general team, no ticket context |
 | `swt --branch` | Constrained mode — auto-detect ticket from git branch name |
-| `swt --CMMS-5412` | Constrained mode — manually specify a Jira ticket |
 | `swt --remote` | Enable Claude Code remote control (can combine with other flags) |
 | `swt --setup` | Install the `swt` launcher into `~/bin` and add it to PATH |
 | `swt --help` | Show usage help |
@@ -146,12 +145,9 @@ swt --help
 
 ```bash
 swt --branch                     # Detect ticket from branch, e.g. bugfix/CMMS-2576-fix → CMMS-2576
-swt --CMMS-5412                  # Work on CMMS-5412 regardless of branch
 swt --branch --remote            # Constrained + remote control
 swt --remote                     # Unconstrained + remote control
 ```
-
-Only one ticket per session. Multiple ticket flags will error.
 
 ## Configuration
 
@@ -227,7 +223,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.19.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.22.2 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -243,7 +239,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.19.0
+[swt] ✓ Version: 0.22.2
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
@@ -251,6 +247,8 @@ The deploy script prints a compact info panel, then TPM prints structured status
 [swt] ✓ Ticket: CMMS-2576 (pulled from Jira)
 [swt] ✓ Knowledge: CMMS/CMMS.md found
 [swt] ✓ Notes: CMMS/2576.md resuming from 2026-04-13
+[swt] ✓ Review mode: off (author mode)
+[swt] ✓ Work repo: cmms-api (~/cmms/cmms-api)
 [swt] ✓ Repo: dotnet, 142 files
 [swt] ✓ Ready
 ```
@@ -259,9 +257,13 @@ If any step fails, it prints an X and continues to the next step. If Jira is una
 
 ## Workflow
 
+### Planning Phase (fresh branch)
+
+If `swt --branch` detects a zero-commit branch, TPM auto-deploys 3 SWEs in parallel (architecture, implementation, test-strategy lenses) to plan the implementation from the Jira acceptance criteria. SWEs do not write code; they return structured plan fragments. TPM aggregates, presents the plan, and logs it to the Obsidian ticket notes under `## Implementation Plan`. You review, adjust, then move to the Development Phase.
+
 ### Development Phase
 
-1. **Boot** — `swt --branch` or `swt --CMMS-5412` pulls the Jira ticket, sets up Obsidian notes, familiarizes with repo
+1. **Boot** — `swt --branch` pulls the Jira ticket, sets up Obsidian notes, familiarizes with repo
 2. **Discuss** — TPM and user talk through implementation, edge cases, trade-offs
 3. **Preview (optional)** — For high-risk or large changes, TPM deploys SWEs in preview mode. SWEs plan changes and return a structured preview (files, scope, risks) without editing anything. User approves or adjusts before code is written.
 4. **Code** — TPM deploys SWEs with file ownership boundaries. SWEs write code with one-sentence explanations per change.
@@ -343,17 +345,24 @@ Project-SWT/
 - **Parent file** (`CMMS/CMMS.md`) — architecture, conventions, gotchas. Agents read first, update with significant discoveries.
 - **Ticket notes** (`CMMS/5412.md`) — contains all per-ticket work:
   - `## Ticket Summary` — pulled from Jira at start
+  - `## Implementation Plan` — aggregated from planning-mode SWEs (architecture/implementation/test-strategy)
   - `## Implementation Notes` — discussion points, approach decisions
   - `## Changes Made` — one-sentence explanations from SWEs
   - `## Edge Cases` — discovered during development
   - `## Testing Procedures` — written collaboratively by TPM + user
   - `## QA Findings` — from QA review
+  - `## Branch Review` — findings from review-mode SWEs (security/logic/quality)
   - `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
+
+  Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions.
 
 ## Modes
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Unconstrained** | `swt` | No ticket context. General team ready to help with whatever you need. TPM can bootstrap constrained mode mid-session if you reference a ticket. |
-| **Constrained (auto)** | `swt --branch` | Detects ticket from your git branch name (e.g., `CMMS-2563-add-login` or `bugfix/CMMS-2563-fix` → `CMMS-2563`). Pulls Jira, sets up Obsidian notes, session scoped to that ticket. |
-| **Constrained (manual)** | `swt --CMMS-5412` | Manually specify a ticket. Same behavior as auto, but you choose the ticket regardless of branch. |
+| **Unconstrained** | `swt` | No ticket context. General team ready for whatever you need. |
+| **Constrained** | `swt --branch` | Detects ticket from git branch name. Pulls Jira, sets up Obsidian notes. |
+| **Planning (auto)** | `swt --branch` on fresh branch | Constrained mode + 0 commits → 3 SWEs plan the ticket from AC. |
+| **Review (auto)** | `swt --branch` on colleague's branch | Constrained mode + commits by others → 3 SWEs review the diff (security/logic/quality lenses). |
+| **Review (manual)** | mid-session, user says "review the changes" or similar | Constrained or unconstrained — user verbally triggers Review Mode to analyze a branch diff. |
+| **Preview (manual)** | mid-session, user or TPM invokes | Dry-run code planning for a specific change. |
