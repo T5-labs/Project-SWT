@@ -247,33 +247,33 @@ SWT_BOARD_URL=$(grep '^board_url' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null 
 export SWT_BOARD_URL
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
-DISPLAY_DIR="${WORK_DIR/#${HOME}/\~}"
-
 if [ "$IS_WSL" = true ]; then PLATFORM="WSL"; else PLATFORM="Git Bash"; fi
 
 INFO1="TPM (orchestrator)           ${TPM_COUNT} session"
 INFO2="SWE (performance)            ${SWE_PERFORMANCE_CORES} cores"
 INFO3="SWE (efficiency)             ${SWE_EFFICIENCY_CORES} core"
 INFO4="QA  (verifier)               ${QA_AGENT_COUNT} agent"
-REPO_NAME="$(basename "$WORK_DIR")"
-INFO5=""
+
+INFO_PROJECT=""
+INFO_TICKET=""
 if [ "$MODE" = "constrained" ]; then
-    INFO5="${REPO_NAME} | ${SWT_BRANCH} (${SWT_TICKET})"
-else
-    INFO5="${REPO_NAME} | ${SWT_BRANCH}"
+    INFO_PROJECT="Project: ${SWT_PROJECT}"
+    INFO_TICKET="Ticket: ${SWT_NUMBER}"
 fi
-INFO6="${DISPLAY_DIR}"
+
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
-    INFO6="${INFO6} | DB: ${SWT_DB_CONNECTION}"
-elif [ "$SWT_DB_ENABLED" != "true" ]; then
-    INFO6="${INFO6} | DB: disabled"
+    INFO_DB="DB: ${SWT_DB_CONNECTION}"
+else
+    INFO_DB="DB: disabled"
 fi
-INFO7=""
+
+INFO_BOARD=""
 if [ -n "$SWT_BOARD_URL" ]; then
-    INFO7="Board: ${SWT_BOARD_URL}"
+    INFO_BOARD="Board: ${SWT_BOARD_URL}"
 fi
+
 DISPLAY_OBSIDIAN="${SWT_OBSIDIAN_PATH/#${HOME}/\~}"
-INFO8="Notes: ${DISPLAY_OBSIDIAN}"
+INFO_NOTES="Notes: ${DISPLAY_OBSIDIAN}"
 
 # Print a padded line inside the box
 swt_line() {
@@ -303,24 +303,23 @@ swt_line "$INFO2"
 swt_line "$INFO3"
 swt_line "$INFO4"
 printf "│%88s│\n" ""
-swt_line "$INFO5"
-swt_line "$INFO6"
-if [ -n "$INFO7" ]; then
-    swt_line "$INFO7"
+if [ -n "$INFO_PROJECT" ]; then
+    swt_line "$INFO_PROJECT"
 fi
-swt_line "$INFO8"
+if [ -n "$INFO_TICKET" ]; then
+    swt_line "$INFO_TICKET"
+fi
+swt_line "$INFO_DB"
+if [ -n "$INFO_BOARD" ]; then
+    swt_line "$INFO_BOARD"
+fi
+swt_line "$INFO_NOTES"
 printf "│%88s│\n" ""
 echo "╰${BORDER}╯"
 echo ""
 
 # ── Launch TPM ────────────────────────────────────────────────────
 echo "[swt] Starting TPM v${VERSION} in CLI mode..."
-echo "[swt] Work repo: $WORK_DIR"
-
-if [ "$MODE" = "constrained" ]; then
-    echo "[swt] Ticket: $SWT_TICKET (project=$SWT_PROJECT, number=$SWT_NUMBER)"
-fi
-
 echo ""
 
 # Launch claude with TPM identity loaded from CLAUDE.md + Project-SWT file access
