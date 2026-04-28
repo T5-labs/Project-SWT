@@ -9,9 +9,11 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Sprint & board queries** — Ask natural language questions about your sprint ("what's in progress?", "what's assigned to me?")
 - **Obsidian knowledge base** — Living project notes and per-ticket working docs that persist across sessions
 - **Multi-session continuity** — Handoff summaries let you pick up exactly where you left off
+- **Feedback Log** — Persistent idea log. Say "log this for later" to append entries; surfaced on each boot.
 - **Preview mode** — Dry-run code changes for review before any files are touched
 - **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings
 - **Fresh Branch Planning** — Auto-detects zero-commit branches on `swt --branch` and deploys 3 SWEs in parallel (architecture, implementation, test-strategy lenses) to plan the ticket from its Jira AC, with the plan logged to Obsidian notes
+- **Support Mode** — Multi-app support sessions via `swt --support`. Auto-discovers configured app repos, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate.
 - **QA verification** — Automated code review of SWE changes plus Playwright test generation
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
@@ -61,7 +63,7 @@ swt --branch           # Constrained — auto-detects ticket from git branch nam
    chmod +x ~/bin/swt
    ```
 
-3. Configure `.claude/config/swt.yml` (see [Configuration](#configuration) below)
+3. On first boot, `deploy.sh` automatically creates `swt_settings.json` in your Windows home directory, seeded from `.claude/config/swt.yml` defaults. You can either pre-fill `swt.yml` with your personal values before the first boot, or boot with defaults and edit `swt_settings.json` directly afterward. See [Configuration](#configuration) for the full schema.
 
 ### WSL Setup
 
@@ -118,10 +120,10 @@ If you prefer running SWT from WSL instead of Git Bash:
 **Notes:**
 - **Auth in WSL:** `claude auth login` hangs in WSL because the OAuth browser callback can't reach the WSL environment. The workaround is to symlink the Windows-side credentials file (step 4 above). If the credentials expire, re-authenticate from Git Bash and the symlink picks up the new token automatically.
 - WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
-- `deploy.sh` auto-detects WSL and translates Windows paths from `swt.yml` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
+- `deploy.sh` auto-detects WSL and translates Windows paths from `swt_settings.json` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
 - The `--setup` launcher is cross-platform — if you run `--setup` from Git Bash, the same `~/bin/swt` file works in WSL too (and vice versa), since WSL inherits the Windows PATH.
 - WSL mount points vary by distro and configuration — `/mnt/c` is standard, but some setups (e.g., custom `/etc/wsl.conf`) mount drives at `/mnt/host/c` or elsewhere. Run `ls /mnt/` to see what's available.
-- The `swt.yml` config file is shared between Git Bash and WSL — no separate config needed
+- `swt_settings.json` is shared between Git Bash and WSL — no separate config needed
 - LINQPad (Windows binary) works from WSL via Windows interop
 - Playwright in WSL may need additional setup to locate the Edge browser — test when writing specs
 
@@ -139,6 +141,7 @@ swt --help
 | `swt --branch` | Constrained mode — auto-detect ticket from git branch name |
 | `swt --remote` | Enable Claude Code remote control (can combine with other flags) |
 | `swt --setup` | Install the `swt` launcher into `~/bin` and add it to PATH |
+| `swt --support` | Support mode — multi-app investigation sessions |
 | `swt --help` | Show usage help |
 
 **Examples:**
@@ -147,59 +150,85 @@ swt --help
 swt --branch                     # Detect ticket from branch, e.g. bugfix/CMMS-2576-fix → CMMS-2576
 swt --branch --remote            # Constrained + remote control
 swt --remote                     # Unconstrained + remote control
+swt --support                    # Support mode — multi-app investigation session
 ```
 
 ## Configuration
 
-All configuration lives in `.claude/config/swt.yml`.
+Configuration is stored in `swt_settings.json` in your Windows home directory (`C:\Users\<you>\swt_settings.json`). This is the single source of truth for all user-tunable values — created automatically on first boot by seeding from `.claude/config/swt.yml`.
+
+**`swt.yml` is now a deprecated seed template.** It is used only once — on the very first `swt` boot — to create `swt_settings.json`. After that, you edit `swt_settings.json` directly, or ask TPM to update values conversationally. You do not need to touch `swt.yml` again.
+
+### swt_settings.json schema
+
+Top-level keys and what they contain:
+
+| Key | Description |
+|-----|-------------|
+| `_schema` | Schema version for future migrations (currently 1) |
+| `team` | Agent core counts and limits (`swe_count`, `swe_performance_cores`, `swe_efficiency_cores`, `qa_count`) |
+| `atlassian` | Jira cloud ID, site URL, board ID and URL |
+| `paths` | Obsidian vault path, Edge browser profile path, LINQPad runner path |
+| `playwright` | Playwright settings (`headless` toggle) |
+| `database` | Database toggle and `allowlist` map of project keys to LINQPad connection names |
+| `feedback` | Feedback log toggle and entries |
+| `support` | Support mode toggle, app list, search roots, and repos |
+
+To edit a value: open `swt_settings.json` directly in any text editor, or ask TPM *"update my Obsidian path to X"* and TPM will make the edit for you.
 
 ### Obsidian
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `obsidian_base_path` | Path to your Obsidian vault where agent notes are stored | `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle` |
+| `paths.obsidian_base` | Path to your Obsidian vault where agent notes are stored | `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle` |
 
 ### Atlassian / Jira
 
 | Setting | Description |
 |---------|-------------|
-| `atlassian_cloud_id` | Your Atlassian Cloud tenant ID. If not set, TPM discovers it on first boot via `getAccessibleAtlassianResources`. |
-| `atlassian_site` | Your Atlassian site URL (e.g., `herzog.atlassian.net`) |
-| `board_id` | Jira board ID for sprint queries (e.g., `393`). Found in your board URL. |
-| `board_url` | Full URL to your Jira board. Reference for TPM and easy to update if your board changes. |
+| `atlassian.cloud_id` | Your Atlassian Cloud tenant ID. If not set, TPM discovers it on first boot via `getAccessibleAtlassianResources`. |
+| `atlassian.site` | Your Atlassian site URL (e.g., `herzog.atlassian.net`) |
+| `atlassian.board_id` | Jira board ID for sprint queries (e.g., `393`). Found in your board URL. |
+| `atlassian.board_url` | Full URL to your Jira board. Reference for TPM and easy to update if your board changes. |
 
 ### Agent Team
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `swe_agent_count` | Total max concurrent SWE subagents | `3` |
-| `swe_performance_cores` | Performance SWE cores (primary workers) | `2` |
-| `swe_efficiency_cores` | Efficiency SWE cores (side tasks) | `1` |
-| `qa_agent_count` | Max concurrent QA subagents | `1` |
+| `team.swe_count` | Total max concurrent SWE subagents | `3` |
+| `team.swe_performance_cores` | Performance SWE cores (primary workers) | `2` |
+| `team.swe_efficiency_cores` | Efficiency SWE cores (side tasks) | `1` |
+| `team.qa_count` | Max concurrent QA subagents | `1` |
 
 ### Playwright
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `edge_profile_path` | Path to Microsoft Edge user data directory. Tests use `launchPersistentContext` with this profile to reuse Azure AD sessions. Edge must be closed when running tests. | `C:\Users\aarbuckle\AppData\Local\Microsoft\Edge\User Data` |
-| `playwright_headless` | `true` = headless (no browser window), `false` = headed (visible browser, useful for debugging) | `false` |
+| `paths.edge_profile` | Path to Microsoft Edge user data directory. Tests use `launchPersistentContext` with this profile to reuse Azure AD sessions. Edge must be closed when running tests. | `C:\Users\aarbuckle\AppData\Local\Microsoft\Edge\User Data` |
+| `playwright.headless` | `true` = headless (no browser window), `false` = headed (visible browser, useful for debugging) | `false` |
 
 ### Database Access (via LINQPad)
 
+These settings live in the `database` section of `swt_settings.json`:
+
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `database_enabled` | Global toggle for agent database access | `true` |
-| `lprun_path` | Path to LINQPad 8 CLI runner | `C:\Program Files\LINQPad8\LPRun8.exe` |
-| `databases` | Allowlist mapping Jira project keys to LINQPad connection names. Agents can only query connections in this list. | — |
+| `database.enabled` | Global toggle for agent database access | `true` |
+| `paths.lprun` | Path to LINQPad 8 CLI runner | `C:\Program Files\LINQPad8\LPRun8.exe` |
+| `database.allowlist` | Map of Jira project keys to LINQPad connection names. Agents can only query connections in this map. | — |
 
 **Adding a database:**
 
 1. Create a connection in LINQPad 8 and note its exact name
-2. Add an entry under `databases:` with the project key and connection name:
-   ```yaml
-   databases:
-     - project: CMMS
-       connection: "localhost, 1433.cmms"
+2. Add an entry to the `database.allowlist` object in `swt_settings.json`:
+   ```json
+   "database": {
+     "enabled": true,
+     "allowlist": {
+       "CMMS": "localhost, 1433.cmms",
+       "MCP": "mcpdevsql.MCP_Dev"
+     }
+   }
    ```
 3. Restart your SWT session for changes to take effect
 
@@ -223,7 +252,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.25.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.27.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -234,14 +263,15 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 │   cmms-api | bugfix/CMMS-2576-mrir-notification (CMMS-2576)                             │
 │   ~/cmms/cmms-api | DB: localhost, 1433.cmms                                           │
-│   Feedback: Enabled                                                                    │
+│   Feedback: Enabled (3 entries)                                                        │
+│   Support: Enabled (3/4 apps mapped)                                                   │
 │   Board: https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393         │
 │   Notes: ~/Documents/Obsidian/aarbuckle                                                │
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.25.0
-[swt] ✓ Config loaded (swt.yml)
+[swt] ✓ Version: 0.27.0
+[swt] ✓ Config loaded (swt_settings.json)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
 [swt] ✓ Atlassian: herzog.atlassian.net
@@ -310,6 +340,8 @@ When you wrap up, TPM writes a handoff summary to Obsidian notes (completed, in 
 
 ## Directory Structure
 
+Note: `swt_settings.json` lives in your Windows home directory (`C:\Users\<you>\swt_settings.json`), not in this repo.
+
 ```
 Project-SWT/
 ├── CLAUDE.md                     # TPM system prompt (loaded via --append-system-prompt-file)
@@ -321,7 +353,7 @@ Project-SWT/
 │   └── clipboard-read.ps1       # Saves Windows clipboard image to temp file
 ├── .claude/
 │   ├── config/
-│   │   └── swt.yml               # All configuration (see Configuration section)
+│   │   └── swt.yml               # Deprecated seed template — used only on first boot
 │   ├── settings.json             # Permission settings
 │   └── agents/
 │       ├── tpm-agent.md          # TPM definition
@@ -367,3 +399,4 @@ Project-SWT/
 | **Review (auto)** | `swt --branch` on colleague's branch | Constrained mode + commits by others → 3 SWEs review the diff (security/logic/quality lenses). |
 | **Review (manual)** | mid-session, user says "review the changes" or similar | Constrained or unconstrained — user verbally triggers Review Mode to analyze a branch diff. |
 | **Preview (manual)** | mid-session, user or TPM invokes | Dry-run code planning for a specific change. |
+| **Support** | `swt --support` | Dedicated multi-app support work. Reads `support.repos` from settings, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate across configured app repos. |

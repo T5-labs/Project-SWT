@@ -1,5 +1,22 @@
+# =============================================================================
+# DEPRECATED — DO NOT EDIT FOR DAY-TO-DAY USE
+# =============================================================================
+# This file is the first-boot SEED TEMPLATE only. It is read by deploy.sh ONLY
+# on first boot when ~/swt_settings.json does not yet exist (deploy.sh uses
+# these values to populate the new unified settings file). After first boot,
+# edit ~/swt_settings.json directly — changes here will have no effect.
+#
+# All user-tunable values now live in swt_settings.json. See README.md for the
+# new format and migration details.
+#
+# Each section below is annotated with the JSON path it maps to in
+# swt_settings.json. DO NOT REMOVE any keys — deploy.sh's first-boot migration
+# expects them all to be present.
+# =============================================================================
+
 # SWT Configuration
 # Base path for Obsidian notes — agents create project/ticket files here
+# → swt_settings.json: paths.obsidian_base
 obsidian_base_path: "C:\\Users\\aarbuckle\\Documents\\Obsidian\\aarbuckle"
 
 # Feedback Log
@@ -8,22 +25,60 @@ obsidian_base_path: "C:\\Users\\aarbuckle\\Documents\\Obsidian\\aarbuckle"
 # and asks the user if they want to revisit prior ideas.
 # Leave feedback_path empty to auto-resolve to the user's Windows home directory
 # (works for any user/colleague — does not hardcode a specific username).
+# → swt_settings.json: feedback.enabled
+# → feedback_path is no longer used at runtime — feedback now lives inline in
+#   swt_settings.json under feedback.entries[]. The legacy swt_feedback.md
+#   file (if present) is migrated into the JSON on first boot.
 feedback_enabled: true
 feedback_path: ""
 
+# Support Mode
+# Tracks the local checkout paths of apps the user supports day-to-day. On every
+# boot, deploy.sh runs an incremental discovery pass — for any app missing from
+# swt_support.md, it searches the configured roots and appends the result. Run
+# `swt --support` to enter support-mode for the session (read-only, no Jira).
+#
+# support_path: directory containing swt_support.md. Leave empty to auto-resolve
+#   to the user's Windows home directory (same pattern as feedback_path).
+# support_apps: YAML flow-style list of app names (one line, square brackets).
+#   Each entry becomes one line in swt_support.md.
+# support_search_roots: YAML flow-style list of directories to search for app
+#   checkouts. Use Windows-form paths with doubled backslashes. The %USERNAME%
+#   placeholder is case-sensitive (must be uppercase). Discovery runs
+#   `find <root> -maxdepth 4 -type d -iname '<APP>'` and picks the first match
+#   that contains a .git subdirectory.
+# → swt_settings.json: support.enabled
+# → swt_settings.json: support.apps[]
+# → swt_settings.json: support.search_roots[]
+# → support_path is no longer used at runtime — support data now lives inline
+#   in swt_settings.json under support.repos{}. The legacy swt_support.md file
+#   (if present) is migrated into the JSON on first boot.
+support_enabled: true
+support_path: ""
+support_apps: [CMMS, HITS, TPS, MCP]
+support_search_roots: ["C:\\Users\\%USERNAME%\\source\\repos", "C:\\Users\\%USERNAME%\\Documents", "C:\\dev", "C:\\Projects", "C:\\Source"]
+
 # Agent Team Configuration
+# → swt_settings.json: team.swe_count
+# → swt_settings.json: team.swe_efficiency_cores
+# → swt_settings.json: team.swe_performance_cores
+# → swt_settings.json: team.qa_count
 swe_agent_count: 3          # Total max concurrent SWE subagents
 swe_efficiency_cores: 1     # Routine tasks
 swe_performance_cores: 2    # Complex tasks
 qa_agent_count: 1           # Max concurrent QA subagents
 
 # Atlassian / Jira Configuration
+# → swt_settings.json: atlassian.cloud_id
+# → swt_settings.json: atlassian.site
 atlassian_cloud_id: "c636d04f-2517-4658-97ec-9f0e61f6ec55"
 atlassian_site: "herzog.atlassian.net"
 
 # Jira Board Configuration
 # Board URL and ID for sprint queries. TPM uses JQL with openSprints() to query
 # the active sprint. Update the board_id and board_url if your board changes.
+# → swt_settings.json: atlassian.board_id
+# → swt_settings.json: atlassian.board_url
 board_id: 393
 board_url: "https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393"
 
@@ -31,14 +86,18 @@ board_url: "https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/39
 # Edge browser profile path for launchPersistentContext
 # Tests reuse the user's existing Edge session (Azure AD cookies, etc.)
 # Caveat: Edge must be closed when running Playwright tests
+# → swt_settings.json: paths.edge_profile
 edge_profile_path: "C:\\Users\\aarbuckle\\AppData\\Local\\Microsoft\\Edge\\User Data"
 
 # Set to true to run Playwright tests headless (no visible browser window)
 # Set to false to run headed (browser window visible — useful for debugging/watching tests)
+# → swt_settings.json: playwright.headless
 playwright_headless: false
 
 # Database Access (via LINQPad)
 # Set to false to disable all database access for agents
+# → swt_settings.json: database.enabled
+# → swt_settings.json: paths.lprun
 database_enabled: true
 lprun_path: "C:\\Program Files\\LINQPad8\\LPRun8.exe"
 
@@ -48,6 +107,7 @@ lprun_path: "C:\\Program Files\\LINQPad8\\LPRun8.exe"
 #   1. Create a connection in LINQPad 8 and note its exact name
 #   2. Add an entry below with the project key and connection name
 #   3. Restart your SWT session for changes to take effect
+# → swt_settings.json: database.allowlist (object, not list — keyed by project)
 databases:
   - project: CMMS
     connection: "localhost, 1433.cmms"

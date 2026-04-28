@@ -5,6 +5,7 @@
 # Usage:
 #   swt                      → unconstrained mode (general team, no ticket context)
 #   swt --branch             → constrained mode (auto-detect ticket from git branch)
+#   swt --support            → support mode (scoped to swt_settings.json apps)
 #
 # Install:
 #   See README.md for full setup. Quick version:
@@ -70,27 +71,510 @@ to_native_path() {
 # Project-SWT directory (where this script lives) — exported so TPM can reference it
 export SWT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# ── Agent Team Configuration ───────────────────────────────────────
-# Read team-size knobs from swt.yml; fall back to sensible defaults if missing.
+# ── Python Dependency Check ────────────────────────────────────────
+# python3 is required for JSON parsing of swt_settings.json. Fail loudly with
+# a clear remediation message if missing — every downstream env var depends on it.
+if ! command -v python3 &>/dev/null; then
+    echo "[swt] Error: python3 is required but not found on PATH." >&2
+    echo "[swt] swt_settings.json is read/written via python3 — install it first:" >&2
+    if [ "$IS_WSL" = true ]; then
+        echo "[swt]   sudo apt-get install -y python3" >&2
+    else
+        echo "[swt]   See https://www.python.org/downloads/ (or use your package manager)" >&2
+    fi
+    exit 1
+fi
+
+# ── YAML Helpers (legacy — only used during first-boot migration) ──
+# Read an unquoted scalar value for an anchored top-level key from swt.yml.
+# Returns empty (and exit 0) when the key is missing — caller applies its own default.
 SWT_YML="$SWT_DIR/.claude/config/swt.yml"
 
 _yml_scalar() {
-    # Read an unquoted scalar value for an anchored top-level key from swt.yml.
-    # Returns empty (and exit 0) when the key is missing — caller applies its own default.
     local key="$1"
     { grep "^${key}:" "$SWT_YML" 2>/dev/null || true; } | head -n1 | sed 's/.*: *//' | sed 's/ *#.*//' | tr -d '"' | tr -d '\r'
 }
 
-_SWE_AGENT_COUNT_RAW="$(_yml_scalar swe_agent_count)"
-_SWE_EFFICIENCY_CORES_RAW="$(_yml_scalar swe_efficiency_cores)"
-_SWE_PERFORMANCE_CORES_RAW="$(_yml_scalar swe_performance_cores)"
-_QA_AGENT_COUNT_RAW="$(_yml_scalar qa_agent_count)"
+# Parse YAML flow-style list: "[A, B, C]" → newline-separated tokens.
+_yml_flow_list() {
+    local key="$1"
+    { grep "^${key}:" "$SWT_YML" 2>/dev/null || true; } \
+        | head -n1 \
+        | sed 's/^[^:]*: *//' \
+        | sed 's/^\[//; s/\]$//' \
+        | tr ',' '\n' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | sed 's/^"//; s/"$//' \
+        | grep -v '^$' \
+        || true
+}
+
+# ── JSON Helpers ───────────────────────────────────────────────────
+# All read/write helpers wrap python3. Each is defensive — malformed or missing
+# files return empty strings / non-zero gracefully so `set -euo pipefail` survives.
+# Key paths are dotted (e.g. "team.swe_count", "atlassian.cloud_id"). These
+# helpers do not interpret array indexes — array access goes through _json_get_array.
+
+# Get a scalar value at a dotted key path. Prints empty string on missing/null.
+_json_get() {
+    local file="$1" path="$2"
+    [ -f "$file" ] || { echo ""; return 0; }
+    python3 - "$file" "$path" <<'PY' 2>/dev/null || echo ""
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    cur = data
+    for part in sys.argv[2].split('.'):
+        if part == '':
+            continue
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            cur = None
+            break
+    if cur is None:
+        print('')
+    elif isinstance(cur, bool):
+        print('true' if cur else 'false')
+    elif isinstance(cur, (dict, list)):
+        # Caller wanted a scalar — return empty for containers.
+        print('')
+    else:
+        print(cur)
+except Exception:
+    print('')
+PY
+}
+
+# Get an array of strings at a dotted key path, one per line. Empty for missing/non-array.
+_json_get_array() {
+    local file="$1" path="$2"
+    [ -f "$file" ] || return 0
+    python3 - "$file" "$path" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    cur = data
+    for part in sys.argv[2].split('.'):
+        if part == '':
+            continue
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            cur = None
+            break
+    if isinstance(cur, list):
+        for item in cur:
+            if item is None:
+                continue
+            print(item)
+except Exception:
+    pass
+PY
+}
+
+# Get the keys of an object at a dotted key path, one per line. Empty for missing/non-object.
+_json_get_keys() {
+    local file="$1" path="$2"
+    [ -f "$file" ] || return 0
+    python3 - "$file" "$path" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    cur = data
+    for part in sys.argv[2].split('.'):
+        if part == '':
+            continue
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            cur = None
+            break
+    if isinstance(cur, dict):
+        for k in cur.keys():
+            print(k)
+except Exception:
+    pass
+PY
+}
+
+# Set a scalar value at a dotted key path (creates intermediate objects).
+# Value is interpreted as a string by default; "true"/"false" become bools, ints/floats stay numeric.
+_json_set() {
+    local file="$1" path="$2" value="$3"
+    [ -f "$file" ] || return 0
+    python3 - "$file" "$path" "$value" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    raw = sys.argv[3]
+    # Coerce: bool first, then int, then float, else string.
+    if raw == 'true':
+        coerced = True
+    elif raw == 'false':
+        coerced = False
+    else:
+        try:
+            coerced = int(raw)
+        except ValueError:
+            try:
+                coerced = float(raw)
+            except ValueError:
+                coerced = raw
+    parts = [p for p in sys.argv[2].split('.') if p]
+    cur = data
+    for part in parts[:-1]:
+        if not isinstance(cur, dict):
+            raise SystemExit(0)
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    if isinstance(cur, dict) and parts:
+        cur[parts[-1]] = coerced
+        with open(sys.argv[1], 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+except Exception:
+    pass
+PY
+}
+
+# Append a JSON-fragment to an array at a dotted key path. Creates the array if missing.
+_json_array_append() {
+    local file="$1" path="$2" fragment="$3"
+    [ -f "$file" ] || return 0
+    python3 - "$file" "$path" "$fragment" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    item = json.loads(sys.argv[3])
+    parts = [p for p in sys.argv[2].split('.') if p]
+    cur = data
+    for part in parts[:-1]:
+        if not isinstance(cur, dict):
+            raise SystemExit(0)
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    if isinstance(cur, dict) and parts:
+        last = parts[-1]
+        if last not in cur or not isinstance(cur[last], list):
+            cur[last] = []
+        cur[last].append(item)
+        with open(sys.argv[1], 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+except Exception:
+    pass
+PY
+}
+
+# Set a key inside the object at a dotted key path. Value coerced like _json_set.
+# Pass the literal "null" string to write a JSON null.
+_json_object_set() {
+    local file="$1" path="$2" key="$3" value="$4"
+    [ -f "$file" ] || return 0
+    python3 - "$file" "$path" "$key" "$value" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    raw = sys.argv[4]
+    if raw == 'null':
+        coerced = None
+    elif raw == 'true':
+        coerced = True
+    elif raw == 'false':
+        coerced = False
+    else:
+        try:
+            coerced = int(raw)
+        except ValueError:
+            try:
+                coerced = float(raw)
+            except ValueError:
+                coerced = raw
+    parts = [p for p in sys.argv[2].split('.') if p]
+    cur = data
+    for part in parts:
+        if not isinstance(cur, dict):
+            raise SystemExit(0)
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    if isinstance(cur, dict):
+        cur[sys.argv[3]] = coerced
+        with open(sys.argv[1], 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+except Exception:
+    pass
+PY
+}
+
+# ── Resolve Windows User Home ────────────────────────────────────
+# Compute the Windows-side username and home path once — settings.json,
+# feedback, support, and any future user-state features auto-resolve here.
+# Works on both WSL (whoami.exe) and Git Bash (USERPROFILE).
+WIN_USER=""
+WIN_HOME_DIR=""
+if [ "$IS_WSL" = true ]; then
+    WIN_USER="$(whoami.exe 2>/dev/null | sed 's|.*\\||' | tr -d '\r\n')"
+    if [ -n "$WIN_USER" ] && [ -n "$WSL_C_MOUNT" ]; then
+        WIN_HOME_DIR="${WSL_C_MOUNT}/Users/${WIN_USER}"
+    fi
+else
+    if [ -n "${USERPROFILE:-}" ]; then
+        WIN_HOME_DIR=$(to_native_path "${USERPROFILE//\\//}")
+        WIN_USER="$(basename "$WIN_HOME_DIR" 2>/dev/null || echo "")"
+    fi
+fi
+
+# ── Unified Settings File ─────────────────────────────────────────
+# swt_settings.json lives in the user's Windows home directory. It replaces
+# user-tunable values from swt.yml plus the persistent swt_feedback.md /
+# swt_support.md files. On first boot (file missing), seed from swt.yml and
+# migrate any existing MD content. After creation, swt.yml is never read again.
+SWT_SETTINGS_PATH=""
+if [ -n "$WIN_HOME_DIR" ]; then
+    SWT_SETTINGS_PATH="${WIN_HOME_DIR}/swt_settings.json"
+fi
+export SWT_SETTINGS_PATH
+
+# Build the initial JSON document (seeded from swt.yml + optional MD migration)
+# and write it to $SWT_SETTINGS_PATH. Idempotent — does nothing if file exists.
+_ensure_settings_file() {
+    [ -n "$SWT_SETTINGS_PATH" ] || return 0
+    [ -f "$SWT_SETTINGS_PATH" ] && return 0
+
+    # Seed values from swt.yml (these are the only times we ever read swt.yml
+    # after this boot — every subsequent read goes through swt_settings.json).
+    local seed_swe_count seed_swe_eff seed_swe_perf seed_qa_count
+    seed_swe_count="$(_yml_scalar swe_agent_count)"
+    seed_swe_eff="$(_yml_scalar swe_efficiency_cores)"
+    seed_swe_perf="$(_yml_scalar swe_performance_cores)"
+    seed_qa_count="$(_yml_scalar qa_agent_count)"
+
+    local seed_cloud_id seed_site seed_board_id seed_board_url
+    seed_cloud_id="$({ grep '^atlassian_cloud_id:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//')"
+    seed_site="$({ grep '^atlassian_site:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//')"
+    seed_board_id="$(_yml_scalar board_id)"
+    seed_board_url="$({ grep '^board_url:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//')"
+
+    # Path values: strip surrounding quotes AND normalize YAML-escaped \\ to /
+    # so the JSON stores clean forward-slash Windows paths (matches the prior
+    # sed pipeline used elsewhere in the script).
+    local seed_obsidian seed_edge seed_lprun
+    seed_obsidian="$({ grep '^obsidian_base_path:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')"
+    seed_edge="$({ grep '^edge_profile_path:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')"
+    seed_lprun="$({ grep '^lprun_path:' "$SWT_YML" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')"
+
+    local seed_pw_headless seed_db_enabled seed_feedback_enabled seed_support_enabled
+    seed_pw_headless="$(_yml_scalar playwright_headless)"
+    seed_db_enabled="$(_yml_scalar database_enabled)"
+    seed_feedback_enabled="$(_yml_scalar feedback_enabled)"
+    seed_support_enabled="$(_yml_scalar support_enabled)"
+
+    # Build the database allowlist as a python dict literal from the YAML
+    # repeated-block style ("- project: X / connection: Y"). Use awk to
+    # collect pairs, then format for python.
+    local db_pairs
+    db_pairs="$(awk '
+        /^[[:space:]]*-[[:space:]]*project:[[:space:]]*/ {
+            sub(/.*project:[[:space:]]*/, "", $0); sub(/[[:space:]]*$/, "", $0); proj=$0; next
+        }
+        /^[[:space:]]*connection:[[:space:]]*/ {
+            sub(/.*connection:[[:space:]]*"?/, "", $0); sub(/"?[[:space:]]*$/, "", $0)
+            if (proj != "") { print proj "\t" $0; proj="" }
+        }
+    ' "$SWT_YML" 2>/dev/null || true)"
+
+    # Support apps + roots
+    local support_apps support_roots
+    support_apps="$(_yml_flow_list support_apps)"
+    support_roots="$(_yml_flow_list support_search_roots)"
+
+    # Migration: parse existing swt_feedback.md (bullet lines beginning "- ").
+    # Preserve any **YYYY-MM-DD** prefix as the date; default to today otherwise.
+    local feedback_md="${WIN_HOME_DIR}/swt_feedback.md"
+    local feedback_entries=""
+    if [ -f "$feedback_md" ]; then
+        feedback_entries="$(cat "$feedback_md" 2>/dev/null || true)"
+    fi
+
+    # Migration: parse existing swt_support.md ("- APP: <path>" or "- APP: # TODO").
+    local support_md="${WIN_HOME_DIR}/swt_support.md"
+    local support_md_content=""
+    if [ -f "$support_md" ]; then
+        support_md_content="$(cat "$support_md" 2>/dev/null || true)"
+    fi
+
+    # Track whether we actually migrated MD content (for the boot message and
+    # the SWT_SETTINGS_MIGRATED signal env var consumed by TPM at startup).
+    local migrated_md="false"
+    _SWT_SETTINGS_MIGRATED="false"   # global — survives function return
+    if [ -f "$feedback_md" ] || [ -f "$support_md" ]; then
+        migrated_md="true"
+        _SWT_SETTINGS_MIGRATED="true"
+    fi
+
+    # Hand off to python to build the JSON document. Pass everything via env
+    # to avoid arg-list quoting headaches.
+    SEED_SWE_COUNT="${seed_swe_count:-3}" \
+    SEED_SWE_EFF="${seed_swe_eff:-1}" \
+    SEED_SWE_PERF="${seed_swe_perf:-2}" \
+    SEED_QA_COUNT="${seed_qa_count:-1}" \
+    SEED_CLOUD_ID="$seed_cloud_id" \
+    SEED_SITE="$seed_site" \
+    SEED_BOARD_ID="${seed_board_id:-}" \
+    SEED_BOARD_URL="$seed_board_url" \
+    SEED_OBSIDIAN="$seed_obsidian" \
+    SEED_EDGE="$seed_edge" \
+    SEED_LPRUN="$seed_lprun" \
+    SEED_PW_HEADLESS="${seed_pw_headless:-false}" \
+    SEED_DB_ENABLED="${seed_db_enabled:-true}" \
+    SEED_FEEDBACK_ENABLED="${seed_feedback_enabled:-true}" \
+    SEED_SUPPORT_ENABLED="${seed_support_enabled:-true}" \
+    DB_PAIRS="$db_pairs" \
+    SUPPORT_APPS="$support_apps" \
+    SUPPORT_ROOTS="$support_roots" \
+    FEEDBACK_MD="$feedback_entries" \
+    SUPPORT_MD="$support_md_content" \
+    OUT_FILE="$SWT_SETTINGS_PATH" \
+    python3 - <<'PY' 2>/dev/null || return 0
+import json, os, re, datetime
+
+def _bool(v, default):
+    if v is None or v == '':
+        return default
+    return v.lower() == 'true'
+
+def _int(v, default):
+    try:
+        return int(v) if v not in (None, '') else default
+    except ValueError:
+        return default
+
+today = datetime.date.today().isoformat()
+
+# Database allowlist (TAB-separated proj/connection pairs).
+allowlist = {}
+for line in os.environ.get('DB_PAIRS', '').splitlines():
+    if not line.strip():
+        continue
+    if '\t' in line:
+        proj, conn = line.split('\t', 1)
+        allowlist[proj.strip()] = conn.strip()
+
+# Support apps list.
+apps = [a.strip() for a in os.environ.get('SUPPORT_APPS', '').splitlines() if a.strip()]
+# Support search roots — normalize YAML-escaped \\ to / for consistent path form.
+roots = [r.strip().replace('\\\\', '/').replace('\\', '/')
+         for r in os.environ.get('SUPPORT_ROOTS', '').splitlines() if r.strip()]
+
+# Feedback migration: each non-empty line starting with "- " is one entry.
+# Preserve **YYYY-MM-DD** prefix as the date if present; else today.
+feedback_entries = []
+date_re = re.compile(r'^\*\*(\d{4}-\d{2}-\d{2})\*\*\s*[:\-]?\s*(.*)$')
+for raw in os.environ.get('FEEDBACK_MD', '').splitlines():
+    s = raw.strip()
+    if not s.startswith('- '):
+        continue
+    text = s[2:].strip()
+    m = date_re.match(text)
+    if m:
+        feedback_entries.append({'date': m.group(1), 'text': m.group(2).strip()})
+    else:
+        feedback_entries.append({'date': today, 'text': text})
+
+# Support repos: parse "- APP: <value>" lines. Skip "# TODO" markers (→ null).
+repos = {a: None for a in apps}
+support_line_re = re.compile(r'^- ([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$')
+for raw in os.environ.get('SUPPORT_MD', '').splitlines():
+    m = support_line_re.match(raw.strip())
+    if not m:
+        continue
+    app, val = m.group(1), m.group(2).strip()
+    if not val or val.startswith('#'):
+        repos[app] = None
+    else:
+        repos[app] = val
+
+doc = {
+    "_schema": 1,
+    "team": {
+        "swe_count": _int(os.environ.get('SEED_SWE_COUNT'), 3),
+        "swe_efficiency_cores": _int(os.environ.get('SEED_SWE_EFF'), 1),
+        "swe_performance_cores": _int(os.environ.get('SEED_SWE_PERF'), 2),
+        "qa_count": _int(os.environ.get('SEED_QA_COUNT'), 1),
+    },
+    "atlassian": {
+        "cloud_id": os.environ.get('SEED_CLOUD_ID', ''),
+        "site": os.environ.get('SEED_SITE', ''),
+        "board_id": _int(os.environ.get('SEED_BOARD_ID'), 0),
+        "board_url": os.environ.get('SEED_BOARD_URL', ''),
+    },
+    "paths": {
+        "obsidian_base": os.environ.get('SEED_OBSIDIAN', ''),
+        "edge_profile": os.environ.get('SEED_EDGE', ''),
+        "lprun": os.environ.get('SEED_LPRUN', ''),
+    },
+    "playwright": {
+        "headless": _bool(os.environ.get('SEED_PW_HEADLESS'), False),
+    },
+    "database": {
+        "enabled": _bool(os.environ.get('SEED_DB_ENABLED'), True),
+        "allowlist": allowlist,
+    },
+    "feedback": {
+        "enabled": _bool(os.environ.get('SEED_FEEDBACK_ENABLED'), True),
+        "entries": feedback_entries,
+    },
+    "support": {
+        "enabled": _bool(os.environ.get('SEED_SUPPORT_ENABLED'), True),
+        "apps": apps,
+        "search_roots": roots,
+        "repos": repos,
+    },
+}
+
+out = os.environ['OUT_FILE']
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with open(out, 'w', encoding='utf-8') as f:
+    json.dump(doc, f, indent=2)
+    f.write('\n')
+PY
+
+    if [ -f "$SWT_SETTINGS_PATH" ]; then
+        if [ "$migrated_md" = "true" ]; then
+            echo "[swt] ✓ Settings: created swt_settings.json (migrated from swt.yml + MD files)"
+        else
+            echo "[swt] ✓ Settings: created swt_settings.json (seeded from swt.yml)"
+        fi
+    fi
+}
+
+_ensure_settings_file || true
+
+# ── Agent Team Configuration ───────────────────────────────────────
+# Read team-size knobs from swt_settings.json (with sensible defaults). Falls
+# back to swt.yml values only at first-boot via _ensure_settings_file above.
+_SWE_AGENT_COUNT_RAW="$(_json_get "$SWT_SETTINGS_PATH" team.swe_count)"
+_SWE_EFFICIENCY_CORES_RAW="$(_json_get "$SWT_SETTINGS_PATH" team.swe_efficiency_cores)"
+_SWE_PERFORMANCE_CORES_RAW="$(_json_get "$SWT_SETTINGS_PATH" team.swe_performance_cores)"
+_QA_AGENT_COUNT_RAW="$(_json_get "$SWT_SETTINGS_PATH" team.qa_count)"
 
 export TPM_COUNT=1                                                     # There can only be one TPM
 export SWE_AGENT_COUNT="${_SWE_AGENT_COUNT_RAW:-3}"                    # Total max concurrent SWE subagents
 export SWE_EFFICIENCY_CORES="${_SWE_EFFICIENCY_CORES_RAW:-1}"          # Routine tasks
 export SWE_PERFORMANCE_CORES="${_SWE_PERFORMANCE_CORES_RAW:-2}"        # Complex tasks
 export QA_AGENT_COUNT="${_QA_AGENT_COUNT_RAW:-1}"                      # Max concurrent QA subagents
+export SWT_SETTINGS_MIGRATED="${_SWT_SETTINGS_MIGRATED:-false}"        # true only when MD files were migrated this boot
 # ───────────────────────────────────────────────────────────────────
 
 # Save the user's current working directory — this is the work repo
@@ -113,6 +597,8 @@ SWT_PROJECT=""
 SWT_NUMBER=""
 MODE="unconstrained"
 REMOTE=false
+MODE_SUPPORT=false
+MODE_BRANCH=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -121,6 +607,7 @@ for arg in "$@"; do
             echo ""
             echo "  swt                    Unconstrained mode (general team, no ticket context)"
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
+            echo "  swt --support          Support mode (scoped to apps in swt_settings.json)"
             echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo "  swt --setup            Install the swt launcher into ~/bin and update PATH"
             echo ""
@@ -204,23 +691,10 @@ EOF
             REMOTE=true
             ;;
         --branch)
-            # Auto-detect ticket from current git branch name
-            # Strip optional prefix (bugfix/, feature/, hotfix/, etc.) before matching
-            BRANCH_NAME="${SWT_BRANCH##*/}"
-            if [ "$SWT_BRANCH" != "none" ] && [[ "$BRANCH_NAME" =~ ^([A-Za-z]+)-([0-9]+) ]]; then
-                SWT_PROJECT=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
-                SWT_NUMBER="${BASH_REMATCH[2]}"
-                SWT_TICKET="${SWT_PROJECT}-${SWT_NUMBER}"
-                MODE="constrained"
-                export SWT_TICKET
-                export SWT_PROJECT
-                export SWT_NUMBER
-                echo "[swt] Auto-detected ticket from branch: $SWT_TICKET"
-            else
-                echo "[swt] Could not detect ticket from branch: $SWT_BRANCH"
-                echo "[swt] Expected branch format: PROJECT-NUMBER-description (e.g., CMMS-2563-add-login)"
-                exit 1
-            fi
+            MODE_BRANCH=true
+            ;;
+        --support)
+            MODE_SUPPORT=true
             ;;
         *)
             echo "[swt] unknown flag: $arg" >&2
@@ -229,82 +703,173 @@ EOF
     esac
 done
 
+# Validate flag combinations after parsing — --support and --branch are
+# mutually exclusive because they imply different session modes (support
+# scope vs. ticket scope). --remote is independent and combines with either.
+if [ "$MODE_SUPPORT" = true ] && [ "$MODE_BRANCH" = true ]; then
+    echo "[swt] --support and --branch are mutually exclusive" >&2
+    exit 2
+fi
+
+if [ "$MODE_BRANCH" = true ]; then
+    # Auto-detect ticket from current git branch name
+    # Strip optional prefix (bugfix/, feature/, hotfix/, etc.) before matching
+    BRANCH_NAME="${SWT_BRANCH##*/}"
+    if [ "$SWT_BRANCH" != "none" ] && [[ "$BRANCH_NAME" =~ ^([A-Za-z]+)-([0-9]+) ]]; then
+        SWT_PROJECT=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+        SWT_NUMBER="${BASH_REMATCH[2]}"
+        SWT_TICKET="${SWT_PROJECT}-${SWT_NUMBER}"
+        MODE="constrained"
+        export SWT_TICKET
+        export SWT_PROJECT
+        export SWT_NUMBER
+        echo "[swt] Auto-detected ticket from branch: $SWT_TICKET"
+    else
+        echo "[swt] Could not detect ticket from branch: $SWT_BRANCH"
+        echo "[swt] Expected branch format: PROJECT-NUMBER-description (e.g., CMMS-2563-add-login)"
+        exit 1
+    fi
+fi
+
 # ── Validate Obsidian Path ────────────────────────────────────────
-OBSIDIAN_PATH_RAW=$({ grep '^obsidian_base_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+OBSIDIAN_PATH_RAW="$(_json_get "$SWT_SETTINGS_PATH" paths.obsidian_base)"
 OBSIDIAN_PATH=$(to_native_path "$OBSIDIAN_PATH_RAW")
 export SWT_OBSIDIAN_PATH="$OBSIDIAN_PATH"
 if [ -n "$OBSIDIAN_PATH" ] && [ ! -d "$OBSIDIAN_PATH" ]; then
     echo "[swt] Warning: Obsidian base path does not exist: $OBSIDIAN_PATH"
-    echo "[swt] Agents will create it on first use, or update .claude/config/swt.yml"
+    echo "[swt] Agents will create it on first use, or update swt_settings.json"
 fi
 
 # ── Resolve Database Config ──────────────────────────────────────
-DB_ENABLED_RAW=$({ grep '^database_enabled:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//')
+DB_ENABLED_RAW="$(_json_get "$SWT_SETTINGS_PATH" database.enabled)"
 if [ "$DB_ENABLED_RAW" = "true" ]; then
     export SWT_DB_ENABLED="true"
 else
     export SWT_DB_ENABLED="false"
 fi
 
-LPRUN_RAW=$({ grep '^lprun_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+LPRUN_RAW="$(_json_get "$SWT_SETTINGS_PATH" paths.lprun)"
 export SWT_LPRUN_PATH=$(to_native_path "$LPRUN_RAW")
 
-EDGE_PROFILE_RAW=$({ grep '^edge_profile_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+EDGE_PROFILE_RAW="$(_json_get "$SWT_SETTINGS_PATH" paths.edge_profile)"
 export SWT_EDGE_PROFILE_PATH=$(to_native_path "$EDGE_PROFILE_RAW")
 
-SWT_PLAYWRIGHT_HEADLESS=$({ grep '^playwright_headless:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//')
+SWT_PLAYWRIGHT_HEADLESS="$(_json_get "$SWT_SETTINGS_PATH" playwright.headless)"
 export SWT_PLAYWRIGHT_HEADLESS="${SWT_PLAYWRIGHT_HEADLESS:-false}"
 
+# Look up the project's allowlisted DB connection (if any). The allowlist is an
+# object keyed by Jira project (CMMS, MCP, …) → connection-name string.
 SWT_DB_CONNECTION=""
 if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_PROJECT" ]; then
-    SWT_DB_CONNECTION=$(awk "/- project: $SWT_PROJECT\$/{getline; gsub(/.*connection: *\"|\"$/,\"\"); print}" "$SWT_DIR/.claude/config/swt.yml")
+    SWT_DB_CONNECTION="$(_json_get "$SWT_SETTINGS_PATH" "database.allowlist.${SWT_PROJECT}")"
 fi
 export SWT_DB_CONNECTION
 
 # ── Resolve Feedback Config ──────────────────────────────────────
-# Long-running feedback log: TPM checks this file on startup and asks the user
-# if they want to revisit prior ideas. Path auto-resolves to the user's Windows
-# home directory when feedback_path is empty (works for any user/colleague).
-FEEDBACK_ENABLED_RAW=$({ grep '^feedback_enabled:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//' | sed 's/ *#.*//' | tr -d '"' | tr -d '\r')
-FEEDBACK_PATH_RAW=$({ grep '^feedback_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
-
+# Feedback now lives in the unified swt_settings.json under feedback.entries.
+# SWT_FEEDBACK_PATH is preserved for backward compat with TPM, pointing at the
+# same JSON file (TPM reads feedback.entries instead of bullet lines).
+FEEDBACK_ENABLED_RAW="$(_json_get "$SWT_SETTINGS_PATH" feedback.enabled)"
 if [ "${FEEDBACK_ENABLED_RAW:-true}" = "false" ]; then
     export SWT_FEEDBACK_ENABLED="false"
     export SWT_FEEDBACK_PATH=""
+elif [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ]; then
+    export SWT_FEEDBACK_ENABLED="true"
+    export SWT_FEEDBACK_PATH="$SWT_SETTINGS_PATH"
 else
-    # Default ON unless explicitly disabled.
-    FEEDBACK_DIR=""
-    if [ -n "$FEEDBACK_PATH_RAW" ]; then
-        FEEDBACK_DIR=$(to_native_path "$FEEDBACK_PATH_RAW")
-        if [ ! -d "$FEEDBACK_DIR" ]; then
-            echo "[swt] Warning: Feedback path does not exist: $FEEDBACK_DIR"
-            echo "[swt] Agents will create it on first use, or update .claude/config/swt.yml"
-        fi
-    elif [ "$IS_WSL" = true ]; then
-        # Derive Windows username from whoami.exe (e.g. HOSTNAME\user → user).
-        WIN_USER="$(whoami.exe 2>/dev/null | sed 's|.*\\||' | tr -d '\r\n')"
-        if [ -n "$WIN_USER" ] && [ -n "$WSL_C_MOUNT" ]; then
-            FEEDBACK_DIR="${WSL_C_MOUNT}/Users/${WIN_USER}"
-        fi
-    else
-        # Git Bash: USERPROFILE points at the Windows home in native form.
-        if [ -n "${USERPROFILE:-}" ]; then
-            FEEDBACK_DIR=$(to_native_path "${USERPROFILE//\\//}")
-        fi
-    fi
-
-    if [ -n "$FEEDBACK_DIR" ]; then
-        export SWT_FEEDBACK_ENABLED="true"
-        export SWT_FEEDBACK_PATH="${FEEDBACK_DIR}/swt_feedback.md"
-    else
-        echo "[swt] ⚠ Feedback: could not resolve user home, disabling"
-        export SWT_FEEDBACK_ENABLED="false"
-        export SWT_FEEDBACK_PATH=""
-    fi
+    echo "[swt] ⚠ Feedback: settings file unavailable, disabling"
+    export SWT_FEEDBACK_ENABLED="false"
+    export SWT_FEEDBACK_PATH=""
 fi
 
+# ── Resolve Support Config ───────────────────────────────────────
+# Support data lives in swt_settings.json under support.{apps, search_roots, repos}.
+# SWT_SUPPORT_PATH is preserved for backward compat — points at the unified file.
+# Discovery still runs every boot (incremental) — for any app whose repo path is
+# null, scan support.search_roots and write the result back to support.repos.
+SUPPORT_ENABLED_RAW="$(_json_get "$SWT_SETTINGS_PATH" support.enabled)"
+if [ "${SUPPORT_ENABLED_RAW:-true}" = "false" ]; then
+    export SWT_SUPPORT_ENABLED="false"
+    export SWT_SUPPORT_PATH=""
+elif [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ]; then
+    export SWT_SUPPORT_ENABLED="true"
+    export SWT_SUPPORT_PATH="$SWT_SETTINGS_PATH"
+else
+    echo "[swt] ⚠ Support: settings file unavailable, disabling"
+    export SWT_SUPPORT_ENABLED="false"
+    export SWT_SUPPORT_PATH=""
+fi
+
+# Export support mode flag — true only when --support was passed this boot.
+if [ "$MODE_SUPPORT" = true ]; then
+    export SWT_SUPPORT_MODE="true"
+else
+    export SWT_SUPPORT_MODE="false"
+fi
+
+# Incremental discovery: scan support.search_roots for any app whose repo path
+# is null in support.repos, and write the discovered path back to the JSON.
+# Runs on every boot when support is enabled. Never fails the boot.
+_discover_support_repos() {
+    [ "$SWT_SUPPORT_ENABLED" = "true" ] || return 0
+    [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ] || return 0
+
+    # Pull the configured app list and search roots from JSON.
+    local apps_list roots_list
+    apps_list="$(_json_get_array "$SWT_SETTINGS_PATH" support.apps)"
+    roots_list="$(_json_get_array "$SWT_SETTINGS_PATH" support.search_roots)"
+
+    # Resolve search roots — expand %USERNAME% and convert Windows paths to native.
+    local resolved_roots=()
+    local raw_root native_root expanded
+    while IFS= read -r raw_root; do
+        [ -n "$raw_root" ] || continue
+        expanded="${raw_root//%USERNAME%/$WIN_USER}"
+        native_root=$(to_native_path "$expanded")
+        if [ -n "$native_root" ] && [ -d "$native_root" ]; then
+            resolved_roots+=("$native_root")
+        fi
+    done <<< "$roots_list"
+
+    # For each app: if support.repos.<APP> is already set (non-null/non-empty), skip.
+    # Otherwise search and write the result (or null) back into support.repos.
+    local app current match
+    while IFS= read -r app; do
+        [ -n "$app" ] || continue
+        current="$(_json_get "$SWT_SETTINGS_PATH" "support.repos.${app}")"
+        if [ -n "$current" ]; then
+            continue
+        fi
+
+        local matches=()
+        local root
+        for root in "${resolved_roots[@]}"; do
+            # Case-insensitive search up to 4 dirs deep; verify .git presence.
+            while IFS= read -r match; do
+                [ -n "$match" ] || continue
+                if [ -d "${match}/.git" ]; then
+                    matches+=("$match")
+                fi
+            done < <({ find "$root" -maxdepth 4 -type d -iname "$app" 2>/dev/null || true; })
+        done
+
+        if [ "${#matches[@]}" -gt 0 ]; then
+            local found="${matches[0]}"
+            if [ "${#matches[@]}" -gt 1 ]; then
+                echo "[swt] ⚠ Support: multiple matches for ${app}, picked ${found}"
+            fi
+            _json_object_set "$SWT_SETTINGS_PATH" "support.repos" "$app" "$found" || true
+        else
+            # Already null (or missing) — make it explicit so the file shape is stable.
+            _json_object_set "$SWT_SETTINGS_PATH" "support.repos" "$app" "null" || true
+        fi
+    done <<< "$apps_list"
+}
+
+_discover_support_repos || true
+
 # ── Resolve Board Config ────────────────────────────────────────
-SWT_BOARD_URL=$({ grep '^board_url:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//')
+SWT_BOARD_URL="$(_json_get "$SWT_SETTINGS_PATH" atlassian.board_url)"
 export SWT_BOARD_URL
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
@@ -328,20 +893,46 @@ else
     INFO_DB="DB: disabled"
 fi
 
+# Feedback panel line: count entries in feedback.entries JSON array.
 if [ "$SWT_FEEDBACK_ENABLED" = "true" ]; then
     FEEDBACK_COUNT=0
-    if [ -f "$SWT_FEEDBACK_PATH" ]; then
-        # grep -c returns exit 1 when no lines match — guard against pipefail.
-        FEEDBACK_COUNT=$({ grep -c '^- ' "$SWT_FEEDBACK_PATH" 2>/dev/null || true; } | head -n1)
+    if [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ]; then
+        FEEDBACK_COUNT="$(_json_get_array "$SWT_SETTINGS_PATH" feedback.entries | { grep -c . 2>/dev/null || true; } | head -n1)"
         FEEDBACK_COUNT="${FEEDBACK_COUNT:-0}"
     fi
     if [ "$FEEDBACK_COUNT" -gt 0 ] 2>/dev/null; then
-        INFO_FEEDBACK="Feedback: Enabled (${FEEDBACK_COUNT} items)"
+        INFO_FEEDBACK="Feedback: Enabled (${FEEDBACK_COUNT} entries)"
     else
-        INFO_FEEDBACK="Feedback: Enabled"
+        INFO_FEEDBACK="Feedback: Enabled (no entries yet)"
     fi
 else
     INFO_FEEDBACK="Feedback: Disabled"
+fi
+
+# Support panel line: count apps with a non-null repo path vs total tracked apps.
+if [ "$SWT_SUPPORT_ENABLED" = "true" ]; then
+    SUPPORT_MAPPED=0
+    SUPPORT_TOTAL=0
+    if [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ]; then
+        SUPPORT_TOTAL="$(_json_get_keys "$SWT_SETTINGS_PATH" support.repos | { grep -c . 2>/dev/null || true; } | head -n1)"
+        SUPPORT_TOTAL="${SUPPORT_TOTAL:-0}"
+        # _json_get_array on the repos object would skip nulls; instead iterate keys
+        # and count non-null values via _json_get.
+        SUPPORT_MAPPED=0
+        while IFS= read -r _app; do
+            [ -n "$_app" ] || continue
+            if [ -n "$(_json_get "$SWT_SETTINGS_PATH" "support.repos.${_app}")" ]; then
+                SUPPORT_MAPPED=$((SUPPORT_MAPPED + 1))
+            fi
+        done <<< "$(_json_get_keys "$SWT_SETTINGS_PATH" support.repos)"
+    fi
+    if [ "$SWT_SUPPORT_MODE" = "true" ]; then
+        INFO_SUPPORT="Support: ON (mode active, ${SUPPORT_MAPPED}/${SUPPORT_TOTAL} apps mapped)"
+    else
+        INFO_SUPPORT="Support: Enabled (${SUPPORT_MAPPED}/${SUPPORT_TOTAL} apps mapped)"
+    fi
+else
+    INFO_SUPPORT="Support: Disabled"
 fi
 
 INFO_BOARD=""
@@ -388,6 +979,7 @@ if [ -n "$INFO_TICKET" ]; then
 fi
 swt_line "$INFO_DB"
 swt_line "$INFO_FEEDBACK"
+swt_line "$INFO_SUPPORT"
 if [ -n "$INFO_BOARD" ]; then
     swt_line "$INFO_BOARD"
 fi

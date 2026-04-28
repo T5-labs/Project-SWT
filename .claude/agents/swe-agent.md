@@ -249,10 +249,15 @@ EOF
 
 **Hard rules:**
 - **READ-ONLY ONLY** — you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema.
-- Only use the connection name provided by TPM in your assignment — never construct your own connections.
+- Only use the connection name provided by TPM in your assignment — never construct your own connections. The allowlist lives in `swt_settings.json` (the `database.allowlist` map); TPM resolves it for you and passes the connection name directly.
 - Keep queries targeted — don't `SELECT *` from large tables without a `WHERE` clause or `TOP`.
 - Do not call stored procedures that modify data.
 - If TPM did not provide a connection name in your assignment, you do NOT have database access for this task.
+
+**Env vars available to you (set by deploy.sh):**
+- `SWT_DB_CONNECTION` — the resolved connection name for this project's database (sourced from `database.allowlist` in `swt_settings.json`). Passed via TPM's assignment prompt when DB access is granted.
+- `SWT_LPRUN_PATH` — absolute path to the LINQPad CLI runner, pre-resolved for your platform.
+- `SWT_SETTINGS_PATH` — full path to `swt_settings.json`. SWEs typically do not need this directly — it is TPM's tool. Available if you ever need to confirm config state.
 
 ## Web Capabilities
 
@@ -277,4 +282,4 @@ Use web tools when you genuinely need external information. Don't over-browse �
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file or output.
 9. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read Obsidian notes and Project-SWT files when paths are provided by TPM. (b) TPM may provide a different work directory in your assignment when the user has verbally redirected the session — treat that path as your work repo and edit files in it normally.
 10. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.
-11. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own.
+11. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own. Connections are allowlisted in `swt_settings.json` (the `database.allowlist` map); TPM resolves them for you.

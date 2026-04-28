@@ -98,7 +98,7 @@ Does NOT: write feature code in the work repo, run destructive git commands, del
 
 ```
 User runs: swt --branch
-  → TPM resolves Atlassian cloud ID from swt.yml (or discovers via MCP)
+  → TPM resolves Atlassian cloud ID from swt_settings.json (or discovers via MCP)
   → TPM pulls Jira ticket via getJiraIssue("CMMS-5412")
   → TPM reads/creates CMMS/CMMS.md (project knowledge) in Obsidian
   → TPM reads/creates CMMS/5412.md (ticket notes) in Obsidian
@@ -128,6 +128,17 @@ User runs: swt
   → Same agent capabilities, just no Jira/Obsidian scaffolding
 ```
 
+### Support Mode (multi-app team support)
+```
+User runs: swt --support
+  → TPM comes online with support mode active
+  → TPM reads support.repos in swt_settings.json to map each app's path
+  → User describes a support issue, naming the app
+  → TPM treats that app's path as the active work repo
+  → TPM dispatches SWEs to divide-and-conquer the investigation
+  → User can pivot to a different app within the same session
+```
+
 ---
 
 ## Core Allocation
@@ -155,9 +166,17 @@ TPM allocates SWE subagents like CPU cores — efficiency cores for routine work
 
 When booting in constrained mode and the ticket notes already exist from a previous session, TPM reads the last handoff summary and tells the user where things left off. Enables seamless pickup across sessions.
 
+## Settings File
+
+A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist) AND accumulated session data (feedback entries, support repo map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
+
 ## Feedback Log
 
-A persistent, project-agnostic log of feature ideas the user accumulates across sessions. Configured in `swt.yml` (`feedback_enabled`, `feedback_path`); `deploy.sh` resolves the path and exports `SWT_FEEDBACK_ENABLED` and `SWT_FEEDBACK_PATH`. On startup TPM checks the file and, if it exists, surfaces the most recent entries with "want to revisit any of these?". The user can ask TPM to append new entries mid-session ("log this for later"). See `tpm-agent.md` for full behavior.
+A persistent, project-agnostic log of feature ideas the user accumulates across sessions. Stored under the `feedback` key in `swt_settings.json` as an array of `{"date": "YYYY-MM-DD", "text": "..."}` entries; configured via `feedback.enabled`. `deploy.sh` exports `SWT_FEEDBACK_ENABLED` and (for backward-compat) `SWT_FEEDBACK_PATH` — both resolve to the unified settings file. On startup TPM checks the file and, if entries exist, surfaces the most recent ones with "want to revisit any of these?". The user can ask TPM to append new entries mid-session ("log this for later"). See `tpm-agent.md` for full behavior.
+
+## Support Mode
+
+A session-modality dedicated to multi-app team support work, triggered by `swt --support`. Stored under the `support` key in `swt_settings.json` (`support.enabled`, `support.apps[]`, `support.search_roots[]`, `support.repos{}`). `deploy.sh` exports `SWT_SUPPORT_ENABLED`, `SWT_SUPPORT_PATH` (backward-compat alias for `SWT_SETTINGS_PATH`), and `SWT_SUPPORT_MODE`. The `support.repos` object maps supported apps (CMMS, HITS, TPS, MCP) to their local repo paths (or `null` when unmapped) — TPM reads it on every boot to know where each app lives. With `--support`, the entire session is scoped to support work and the user can pivot between apps within the session. Mutually exclusive with `--branch`. See the Support Mode section in `tpm-agent.md` for full behavior.
 
 ## Pre-PR Checklist (CodeRabbit-Aware)
 
@@ -177,9 +196,9 @@ When the user wraps up a session, TPM writes a handoff summary to the Obsidian t
 
 ## Database Access (Read-Only)
 
-Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP tools. Access is configured in `swt.yml` with a global `database_enabled` toggle and an allowlisted `databases` list mapping project keys to connection names.
+Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP tools. Access is configured in `swt_settings.json` with a global `database.enabled` toggle and an allowlisted `database.allowlist` object mapping project keys to connection names.
 
-- Agents can ONLY query databases whose connection name appears in the `swt.yml` allowlist — no exceptions
+- Agents can ONLY query databases whose connection name appears in the `swt_settings.json` allowlist — no exceptions
 - `deploy.sh` resolves the connection name for the current project and passes it to TPM via env vars (`SWT_DB_ENABLED`, `SWT_DB_CONNECTION`)
 - TPM includes the connection name in SWE assignments when database access is needed
 - SWE agents can use `lprun8` to understand schema, verify FK relationships, inspect data state, and confirm migration status
@@ -221,7 +240,7 @@ Project-SWT/tests/          ← gitignored (Playwright specs only)
 
 ## Obsidian Knowledge Base
 
-Base path configured in `.claude/config/swt.yml` (default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`).
+Base path configured in `swt_settings.json` (`paths.obsidian_base`, default: `C:\Users\aarbuckle\Documents\Obsidian\aarbuckle`).
 
 ### Structure
 
@@ -269,7 +288,7 @@ Not every section appears in every ticket — Implementation Plan only appears f
 
 ## Jira Integration
 
-The Atlassian cloud ID and site are configured in `.claude/config/swt.yml`. If not configured, TPM discovers available sites via `getAccessibleAtlassianResources` on startup and uses the first result.
+The Atlassian cloud ID and site are configured in `swt_settings.json` under `atlassian` (`cloud_id`, `site`). If not configured, TPM discovers available sites via `getAccessibleAtlassianResources` on startup and uses the first result.
 
 Agents interact with Jira via Atlassian MCP tools. Available operations:
 
@@ -278,11 +297,11 @@ Agents interact with Jira via Atlassian MCP tools. Available operations:
 | `getJiraIssue` | Pull ticket description, status, assignee |
 | `searchJiraIssuesUsingJql` | Find related tickets, query sprints, answer board questions |
 | `getJiraIssueTypeMetaWithFields` | Understand ticket structure |
-| `getAccessibleAtlassianResources` | Discover Atlassian cloud sites (fallback when cloud ID not in swt.yml) |
+| `getAccessibleAtlassianResources` | Discover Atlassian cloud sites (fallback when cloud ID not in swt_settings.json) |
 
 ### Sprint & Board Queries
 
-TPM can query the user's active sprint to answer questions like "what's in the current sprint?", "what's in progress?", or "what's assigned to me?". The board is configured in `swt.yml` (`board_id`, `board_url`). TPM uses JQL with `sprint in openSprints()` to query sprint data — see the Sprint & Board Queries section in `tpm-agent.md` for full details and JQL patterns.
+TPM can query the user's active sprint to answer questions like "what's in the current sprint?", "what's in progress?", or "what's assigned to me?". The board is configured in `swt_settings.json` under `atlassian` (`board_id`, `board_url`). TPM uses JQL with `sprint in openSprints()` to query sprint data — see the Sprint & Board Queries section in `tpm-agent.md` for full details and JQL patterns.
 
 Agents do NOT:
 - Create Jira tickets
@@ -307,7 +326,7 @@ Project-SWT/
 │   └── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
 ├── .claude/
 │   ├── config/
-│   │   └── swt.yml                        # Base paths, core allocation, Atlassian config
+│   │   └── swt.yml                        # DEPRECATED — first-boot seed only (see swt_settings.json)
 │   ├── settings.json                      # Permission settings
 │   └── agents/
 │       ├── tpm-agent.md                   # TPM agent definition
@@ -334,10 +353,10 @@ These are non-negotiable and must be enforced in all agent definitions:
 7. **OBSIDIAN NOTES ARE LIVING DOCUMENTS** — TPM updates them as work progresses, not just at the end. Only TPM writes to Obsidian files — SWEs and QA report back to TPM who consolidates.
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
-10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) agents may read and write the feedback log at `SWT_FEEDBACK_PATH` when feedback is enabled. (c) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd.
+10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) TPM may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support repos map, plus the rest of user config). (c) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd. In support mode, this redirect exception covers each app path listed in `support.repos` — pivoting to another app's path is a fresh redirect under this same clause.
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
-13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt.yml`.
+13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt_settings.json` (`database.allowlist`).
 
 ---
 

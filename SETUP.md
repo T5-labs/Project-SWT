@@ -4,7 +4,9 @@
 
 ## 1 — Purpose
 
-If you (Claude) are reading this, someone asked you to set up SWT on their machine. The repo's `.claude/config/swt.yml` is checked in with another user's personal values — Obsidian path, Atlassian cloud id, Jira board, Edge profile path, and LINQPad config. Your job is to walk the user through replacing exactly those fields with their own values, editing the file in place. Auto-detect what you can. Ask only for inputs you cannot determine yourself. Do NOT run destructive commands. Do NOT delete anything. Do NOT create any files or directories.
+If you (Claude) are reading this, someone asked you to set up SWT on their machine. The repo's `.claude/config/swt.yml` is a **seed template** checked in with another user's personal values. Your job is to walk the user through replacing exactly those personal fields in `swt.yml` with their own values, editing the file in place. On the user's first `swt` boot, `deploy.sh` will read `swt.yml` and create `swt_settings.json` in their Windows home directory — that JSON file becomes the permanent, living config going forward. You do not create `swt_settings.json` yourself; deploy.sh handles that on first boot.
+
+Auto-detect what you can. Ask only for inputs you cannot determine yourself. Do NOT run destructive commands. Do NOT delete anything. Do NOT create any files or directories.
 
 Your log prefix for this playbook is `[SETUP]`.
 
@@ -207,9 +209,11 @@ Only if `database_enabled: true`. Ask:
 
 > For each database SWT agents may query, give me: (1) the Jira project key (e.g. `CMMS`), (2) the exact LINQPad saved connection name. Enter `done` when finished — can be empty.
 
-Collect into a list. If the user enters nothing, set `databases: []`.
+Collect into a list. If the user enters nothing, set `databases: []`. These values will be seeded into the `database.allowlist` map in `swt_settings.json` on first boot.
 
-### Step 9 — Update `swt.yml` in place
+### Step 9 — Update `swt.yml` in place (seed template)
+
+**Why edit `swt.yml`?** On first `swt` boot, `deploy.sh` reads `swt.yml` and seeds `swt_settings.json` (the permanent JSON config) from its values. Editing `swt.yml` now means the user's first boot will produce a correctly populated `swt_settings.json` automatically, with no manual JSON editing required.
 
 **First, read `.claude/config/swt.yml` end to end.** You need the exact current values (the author's paths, cloud id, board id, database entries, etc.) so your Edit calls have the right `old_string` to match. Do NOT guess — use the Read tool.
 
@@ -252,13 +256,30 @@ Do NOT touch any other lines.
 
 ### Step 10 — Validate
 
-Read the file back and confirm the new values are present. If `python3` is available, run a YAML parse check:
+Read the file back and confirm the new values are present. If `python3` is available, run a YAML parse check on the seed file:
 
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('.claude/config/swt.yml'))" && echo "OK: YAML parses"
 ```
 
 If the parse fails, read the file, identify the malformed line, and fix it with another Edit call.
+
+**Post-first-boot JSON validation (after Step 11 completes):**
+
+After `deploy.sh --setup` runs (Step 11), `swt_settings.json` will have been created in the user's Windows home directory. Validate it:
+
+```bash
+# Resolve the settings file path for the current platform
+if [ "$PLATFORM" = "wsl" ]; then
+  SETTINGS_PATH="${MOUNT}/Users/${WIN_USER}/swt_settings.json"
+elif [ "$PLATFORM" = "gitbash" ]; then
+  SETTINGS_PATH="/c/Users/${WIN_USER}/swt_settings.json"
+fi
+
+python3 -c "import json; json.load(open('${SETTINGS_PATH}'))" && echo "OK: JSON parses"
+```
+
+If the file does not exist yet (first boot hasn't run), skip this check — it will be created when the user runs `swt` for the first time. If the JSON is malformed, read the file, identify the broken line, and fix it with an Edit call targeting `${SETTINGS_PATH}`.
 
 ### Step 11 — Install the `swt` launcher
 
@@ -282,9 +303,11 @@ This creates `~/bin/swt` and appends `export PATH="$HOME/bin:$PATH"` to their sh
 
 Tell the user:
 
-- Setup is complete. Their local `swt.yml` has their values.
+- Setup is complete. Their `swt.yml` seed has their values.
+- On first `swt` boot, deploy.sh will automatically create `swt_settings.json` in their Windows home directory (`C:\Users\<them>\swt_settings.json`). That JSON file is the permanent living config going forward — they edit it directly or ask TPM to update values conversationally.
 - They can now run `swt` (unconstrained) or `swt --branch` (constrained — auto-detects the ticket from the branch name).
-- Caveat: if they ever `git pull` updates that modify `swt.yml`, they may need to re-merge their local values. If they want to avoid this, they can ask a maintainer to gitignore the file — but that decision belongs to the repo maintainer, not the setup process.
+- **Old files:** If they previously used SWT and have `swt_feedback.md` or `swt_support.md` files, those will be automatically migrated into `swt_settings.json` on first boot. After migration, they can delete the old MD files manually — SWT no longer reads from them.
+- Caveat: if they ever `git pull` updates that modify `swt.yml`, they may need to re-merge their personal values into it (so the next fresh-machine setup seeds correctly). Their live config in `swt_settings.json` is unaffected by git pulls.
 - Re-running SETUP is safe. Each Edit call replaces the current value with the new one — you won't end up with duplicates or stale sentinels as long as you follow Step 9's "read first" rule.
 
 ---
@@ -294,5 +317,5 @@ Tell the user:
 - **No destructive git.** No `add`, `commit`, `push`, `pull`, `reset`, `stash`, `checkout`, `branch`, `merge`, `rebase`, or any other write git command.
 - **No deletions.** Do not delete files, directories, or anything else.
 - **Do not create directories.** If the Obsidian vault path doesn't exist, tell the user — do not create it.
-- **Only touch `.claude/config/swt.yml`.** Do not modify any other file in the repo.
+- **Only touch `.claude/config/swt.yml` and (post-first-boot) `swt_settings.json`.** Do not modify any other file in the repo or on the filesystem.
 - **Stay in scope.** If the user asks you to do something beyond this playbook (e.g., "also set up shell aliases", "configure my terminal"), tell them that's out of scope for setup.
