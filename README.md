@@ -223,7 +223,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.22.2 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT v0.25.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -234,12 +234,13 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 │   cmms-api | bugfix/CMMS-2576-mrir-notification (CMMS-2576)                             │
 │   ~/cmms/cmms-api | DB: localhost, 1433.cmms                                           │
+│   Feedback: Enabled                                                                    │
 │   Board: https://herzog.atlassian.net/jira/software/c/projects/CMMS/boards/393         │
 │   Notes: ~/Documents/Obsidian/aarbuckle                                                │
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.22.2
+[swt] ✓ Version: 0.25.0
 [swt] ✓ Config loaded (swt.yml)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification

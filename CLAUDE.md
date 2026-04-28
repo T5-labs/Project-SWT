@@ -60,7 +60,7 @@ The orchestrator and technical discussion partner. Coordinates SWE and QA subage
 - Provides context summaries when user connects
 - Logs with `[TPM]` prefix
 
-Does NOT: write code, run destructive git commands on work repos, create Jira tickets, delete anything. CAN use read-only git (status, diff, log, blame, show).
+Does NOT: write code, run destructive git commands on work repos, create Jira tickets, delete anything. **This includes small changes, quick fixes, and template edits.** If it touches the work repo, deploy a SWE — no exceptions. CAN use read-only git (status, diff, log, blame, show).
 
 ### SWE (ephemeral subagents, spawned by TPM)
 
@@ -154,6 +154,10 @@ TPM allocates SWE subagents like CPU cores — efficiency cores for routine work
 ## Multi-Session Ticket Continuity
 
 When booting in constrained mode and the ticket notes already exist from a previous session, TPM reads the last handoff summary and tells the user where things left off. Enables seamless pickup across sessions.
+
+## Feedback Log
+
+A persistent, project-agnostic log of feature ideas the user accumulates across sessions. Configured in `swt.yml` (`feedback_enabled`, `feedback_path`); `deploy.sh` resolves the path and exports `SWT_FEEDBACK_ENABLED` and `SWT_FEEDBACK_PATH`. On startup TPM checks the file and, if it exists, surfaces the most recent entries with "want to revisit any of these?". The user can ask TPM to append new entries mid-session ("log this for later"). See `tpm-agent.md` for full behavior.
 
 ## Pre-PR Checklist (CodeRabbit-Aware)
 
@@ -330,7 +334,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 7. **OBSIDIAN NOTES ARE LIVING DOCUMENTS** — TPM updates them as work progresses, not just at the end. Only TPM writes to Obsidian files — SWEs and QA report back to TPM who consolidates.
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
-10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd.
+10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) agents may read and write the feedback log at `SWT_FEEDBACK_PATH` when feedback is enabled. (c) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd.
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
 13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt.yml`.

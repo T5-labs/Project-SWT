@@ -1,5 +1,7 @@
 # SWT Setup Playbook (for the agent)
 
+> **Platform support:** SWT is officially supported on **Windows only** (Git Bash and WSL). macOS and Linux are not officially supported. The playbook below includes macOS/Linux detection branches for community experimentation, but they are untested and may not work without additional configuration (e.g. Edge browser availability, LINQPad, Windows path handling).
+
 ## 1 — Purpose
 
 If you (Claude) are reading this, someone asked you to set up SWT on their machine. The repo's `.claude/config/swt.yml` is checked in with another user's personal values — Obsidian path, Atlassian cloud id, Jira board, Edge profile path, and LINQPad config. Your job is to walk the user through replacing exactly those fields with their own values, editing the file in place. Auto-detect what you can. Ask only for inputs you cannot determine yourself. Do NOT run destructive commands. Do NOT delete anything. Do NOT create any files or directories.
@@ -49,8 +51,8 @@ fi
 echo "$PLATFORM"
 ```
 
-- `wsl` / `gitbash`: YAML path values use Windows form with doubled backslashes (`C:\\Users\\...`).
-- `macos` / `linux`: POSIX paths (`/Users/...` or `/home/...`).
+- `wsl` / `gitbash`: YAML path values use Windows form with doubled backslashes (`C:\\Users\\...`). Officially supported.
+- `macos` / `linux`: POSIX paths (`/Users/...` or `/home/...`). **Untested / community-supported only** — Edge browser, LINQPad, and Windows clipboard features will not work as-is.
 
 Tell the user which platform you detected.
 

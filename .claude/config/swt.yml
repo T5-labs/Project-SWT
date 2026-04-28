@@ -2,6 +2,15 @@
 # Base path for Obsidian notes — agents create project/ticket files here
 obsidian_base_path: "C:\\Users\\aarbuckle\\Documents\\Obsidian\\aarbuckle"
 
+# Feedback Log
+# Path to a directory containing swt_feedback.md — a long-running log of
+# feature ideas accumulated across sessions. On startup, TPM checks this file
+# and asks the user if they want to revisit prior ideas.
+# Leave feedback_path empty to auto-resolve to the user's Windows home directory
+# (works for any user/colleague — does not hardcode a specific username).
+feedback_enabled: true
+feedback_path: ""
+
 # Agent Team Configuration
 swe_agent_count: 3          # Total max concurrent SWE subagents
 swe_efficiency_cores: 1     # Routine tasks

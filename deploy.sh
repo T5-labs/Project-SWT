@@ -10,7 +10,7 @@
 #   See README.md for full setup. Quick version:
 #   deploy.sh --setup       → creates ~/bin/swt launcher and updates PATH
 
-set -e
+set -euo pipefail
 
 # ── Platform Detection ─────────────────────────────────────────────
 IS_WSL=false
@@ -67,16 +67,31 @@ to_native_path() {
     fi
 }
 
-# ── Agent Team Configuration ───────────────────────────────────────
-export TPM_COUNT=1                # There can only be one TPM
-export SWE_AGENT_COUNT=3          # Total max concurrent SWE subagents
-export SWE_EFFICIENCY_CORES=1     # Routine tasks
-export SWE_PERFORMANCE_CORES=2    # Complex tasks
-export QA_AGENT_COUNT=1           # Max concurrent QA subagents
-# ───────────────────────────────────────────────────────────────────
-
 # Project-SWT directory (where this script lives) — exported so TPM can reference it
 export SWT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── Agent Team Configuration ───────────────────────────────────────
+# Read team-size knobs from swt.yml; fall back to sensible defaults if missing.
+SWT_YML="$SWT_DIR/.claude/config/swt.yml"
+
+_yml_scalar() {
+    # Read an unquoted scalar value for an anchored top-level key from swt.yml.
+    # Returns empty (and exit 0) when the key is missing — caller applies its own default.
+    local key="$1"
+    { grep "^${key}:" "$SWT_YML" 2>/dev/null || true; } | head -n1 | sed 's/.*: *//' | sed 's/ *#.*//' | tr -d '"' | tr -d '\r'
+}
+
+_SWE_AGENT_COUNT_RAW="$(_yml_scalar swe_agent_count)"
+_SWE_EFFICIENCY_CORES_RAW="$(_yml_scalar swe_efficiency_cores)"
+_SWE_PERFORMANCE_CORES_RAW="$(_yml_scalar swe_performance_cores)"
+_QA_AGENT_COUNT_RAW="$(_yml_scalar qa_agent_count)"
+
+export TPM_COUNT=1                                                     # There can only be one TPM
+export SWE_AGENT_COUNT="${_SWE_AGENT_COUNT_RAW:-3}"                    # Total max concurrent SWE subagents
+export SWE_EFFICIENCY_CORES="${_SWE_EFFICIENCY_CORES_RAW:-1}"          # Routine tasks
+export SWE_PERFORMANCE_CORES="${_SWE_PERFORMANCE_CORES_RAW:-2}"        # Complex tasks
+export QA_AGENT_COUNT="${_QA_AGENT_COUNT_RAW:-1}"                      # Max concurrent QA subagents
+# ───────────────────────────────────────────────────────────────────
 
 # Save the user's current working directory — this is the work repo
 WORK_DIR="$(pwd)"
@@ -171,7 +186,7 @@ EOF
                 echo "[swt] $LAUNCHER_DIR is already on your PATH"
             else
                 # Detect shell rc file
-                if [ -n "$ZSH_VERSION" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+                if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
                     RC_FILE="$HOME/.zshrc"
                 else
                     RC_FILE="$HOME/.bashrc"
@@ -207,11 +222,15 @@ EOF
                 exit 1
             fi
             ;;
+        *)
+            echo "[swt] unknown flag: $arg" >&2
+            exit 2
+            ;;
     esac
 done
 
 # ── Validate Obsidian Path ────────────────────────────────────────
-OBSIDIAN_PATH_RAW=$(grep 'obsidian_base_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+OBSIDIAN_PATH_RAW=$({ grep '^obsidian_base_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
 OBSIDIAN_PATH=$(to_native_path "$OBSIDIAN_PATH_RAW")
 export SWT_OBSIDIAN_PATH="$OBSIDIAN_PATH"
 if [ -n "$OBSIDIAN_PATH" ] && [ ! -d "$OBSIDIAN_PATH" ]; then
@@ -220,20 +239,20 @@ if [ -n "$OBSIDIAN_PATH" ] && [ ! -d "$OBSIDIAN_PATH" ]; then
 fi
 
 # ── Resolve Database Config ──────────────────────────────────────
-DB_ENABLED_RAW=$(grep 'database_enabled' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *//')
+DB_ENABLED_RAW=$({ grep '^database_enabled:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//')
 if [ "$DB_ENABLED_RAW" = "true" ]; then
     export SWT_DB_ENABLED="true"
 else
     export SWT_DB_ENABLED="false"
 fi
 
-LPRUN_RAW=$(grep 'lprun_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+LPRUN_RAW=$({ grep '^lprun_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
 export SWT_LPRUN_PATH=$(to_native_path "$LPRUN_RAW")
 
-EDGE_PROFILE_RAW=$(grep 'edge_profile_path' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+EDGE_PROFILE_RAW=$({ grep '^edge_profile_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
 export SWT_EDGE_PROFILE_PATH=$(to_native_path "$EDGE_PROFILE_RAW")
 
-SWT_PLAYWRIGHT_HEADLESS=$(grep 'playwright_headless' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *//')
+SWT_PLAYWRIGHT_HEADLESS=$({ grep '^playwright_headless:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//')
 export SWT_PLAYWRIGHT_HEADLESS="${SWT_PLAYWRIGHT_HEADLESS:-false}"
 
 SWT_DB_CONNECTION=""
@@ -242,8 +261,50 @@ if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_PROJECT" ]; then
 fi
 export SWT_DB_CONNECTION
 
+# ── Resolve Feedback Config ──────────────────────────────────────
+# Long-running feedback log: TPM checks this file on startup and asks the user
+# if they want to revisit prior ideas. Path auto-resolves to the user's Windows
+# home directory when feedback_path is empty (works for any user/colleague).
+FEEDBACK_ENABLED_RAW=$({ grep '^feedback_enabled:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *//' | sed 's/ *#.*//' | tr -d '"' | tr -d '\r')
+FEEDBACK_PATH_RAW=$({ grep '^feedback_path:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//' | sed 's/\\\\/\//g')
+
+if [ "${FEEDBACK_ENABLED_RAW:-true}" = "false" ]; then
+    export SWT_FEEDBACK_ENABLED="false"
+    export SWT_FEEDBACK_PATH=""
+else
+    # Default ON unless explicitly disabled.
+    FEEDBACK_DIR=""
+    if [ -n "$FEEDBACK_PATH_RAW" ]; then
+        FEEDBACK_DIR=$(to_native_path "$FEEDBACK_PATH_RAW")
+        if [ ! -d "$FEEDBACK_DIR" ]; then
+            echo "[swt] Warning: Feedback path does not exist: $FEEDBACK_DIR"
+            echo "[swt] Agents will create it on first use, or update .claude/config/swt.yml"
+        fi
+    elif [ "$IS_WSL" = true ]; then
+        # Derive Windows username from whoami.exe (e.g. HOSTNAME\user → user).
+        WIN_USER="$(whoami.exe 2>/dev/null | sed 's|.*\\||' | tr -d '\r\n')"
+        if [ -n "$WIN_USER" ] && [ -n "$WSL_C_MOUNT" ]; then
+            FEEDBACK_DIR="${WSL_C_MOUNT}/Users/${WIN_USER}"
+        fi
+    else
+        # Git Bash: USERPROFILE points at the Windows home in native form.
+        if [ -n "${USERPROFILE:-}" ]; then
+            FEEDBACK_DIR=$(to_native_path "${USERPROFILE//\\//}")
+        fi
+    fi
+
+    if [ -n "$FEEDBACK_DIR" ]; then
+        export SWT_FEEDBACK_ENABLED="true"
+        export SWT_FEEDBACK_PATH="${FEEDBACK_DIR}/swt_feedback.md"
+    else
+        echo "[swt] ⚠ Feedback: could not resolve user home, disabling"
+        export SWT_FEEDBACK_ENABLED="false"
+        export SWT_FEEDBACK_PATH=""
+    fi
+fi
+
 # ── Resolve Board Config ────────────────────────────────────────
-SWT_BOARD_URL=$(grep '^board_url' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null | sed 's/.*: *"//' | sed 's/".*//')
+SWT_BOARD_URL=$({ grep '^board_url:' "$SWT_DIR/.claude/config/swt.yml" 2>/dev/null || true; } | sed 's/.*: *"//' | sed 's/".*//')
 export SWT_BOARD_URL
 
 # ── Boot Diagnostics ──────────────────────────────────────────────
@@ -265,6 +326,22 @@ if [ "$SWT_DB_ENABLED" = "true" ] && [ -n "$SWT_DB_CONNECTION" ]; then
     INFO_DB="DB: ${SWT_DB_CONNECTION}"
 else
     INFO_DB="DB: disabled"
+fi
+
+if [ "$SWT_FEEDBACK_ENABLED" = "true" ]; then
+    FEEDBACK_COUNT=0
+    if [ -f "$SWT_FEEDBACK_PATH" ]; then
+        # grep -c returns exit 1 when no lines match — guard against pipefail.
+        FEEDBACK_COUNT=$({ grep -c '^- ' "$SWT_FEEDBACK_PATH" 2>/dev/null || true; } | head -n1)
+        FEEDBACK_COUNT="${FEEDBACK_COUNT:-0}"
+    fi
+    if [ "$FEEDBACK_COUNT" -gt 0 ] 2>/dev/null; then
+        INFO_FEEDBACK="Feedback: Enabled (${FEEDBACK_COUNT} items)"
+    else
+        INFO_FEEDBACK="Feedback: Enabled"
+    fi
+else
+    INFO_FEEDBACK="Feedback: Disabled"
 fi
 
 INFO_BOARD=""
@@ -310,6 +387,7 @@ if [ -n "$INFO_TICKET" ]; then
     swt_line "$INFO_TICKET"
 fi
 swt_line "$INFO_DB"
+swt_line "$INFO_FEEDBACK"
 if [ -n "$INFO_BOARD" ]; then
     swt_line "$INFO_BOARD"
 fi

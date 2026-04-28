@@ -82,7 +82,7 @@ Print each status line as you complete it using this exact format — `[swt]` pr
       - **All commits by current user** → author mode. Print: `[swt] ✓ Review mode: off (author mode)`
       - **All commits by someone else** → **review mode ON.** Print: `[swt] ✓ Review mode: ON ({N} commits by {author})`
       - **Mixed authors** → ask the user: "Branch has commits from you and {other}. Are we reviewing this, or is it yours?"
-        - If they say review: set review mode ON, print `[swt] ✓ Review mode: ON ({N} commits, mixed authors — confirmed review)`, and continue the sequence (step 9 will auto-kickoff the review flow).
+        - If they say review: set review mode ON, print `[swt] ✓ Review mode: ON ({N} commits, mixed authors — confirmed review)`, and continue the sequence (step 10 will auto-kickoff the review flow).
         - If they say theirs: set review mode OFF, print `[swt] ✓ Review mode: off (author mode — confirmed)`, and continue normally.
 
       If the base branch isn't `main`, infer with `git merge-base` or ask. Review detection runs only in constrained mode — unconstrained sessions skip this.
@@ -99,13 +99,21 @@ Print each status line as you complete it using this exact format — `[swt]` pr
    - If the parent knowledge file exists, read it for cached context
    - Print: `[swt] ✓ Repo: {tech stack}, {file count} files`
 
-7. Print: `[swt] ✓ Ready`
+7. **Feedback log check.** Read `SWT_FEEDBACK_ENABLED` and `SWT_FEEDBACK_PATH` from env. The path is fully resolved by `deploy.sh` (it points at the `swt_feedback.md` file itself, not the directory) — do NOT compute paths yourself.
+   - If `SWT_FEEDBACK_ENABLED` is not `"true"`: print `[swt] ✓ Feedback: disabled` and continue.
+   - If `SWT_FEEDBACK_ENABLED == "true"` and the file at `SWT_FEEDBACK_PATH` does not exist: print `[swt] ✓ Feedback: enabled (no log yet)` and continue.
+   - If `SWT_FEEDBACK_ENABLED == "true"` and the file exists: read it, count items (bullet-list entries — lines beginning with `-` or `*`), print `[swt] ✓ Feedback: enabled ({N} items at {SWT_FEEDBACK_PATH})`. The actual surfacing of entries to the user happens later (step 11) so it doesn't interleave with the rest of startup output.
+   - **This step must NEVER fail the boot.** If anything goes wrong (read error, malformed file, env var unset when expected, etc.), print `[swt] ✗ Feedback: {short reason}` and continue to the next step. The feedback log is best-effort context, not a critical dependency.
 
-8. If resuming from a previous session, tell the user: "Picking up from last session — [brief summary of where things left off]. Want to continue from there?"
+8. Print: `[swt] ✓ Ready`
 
-9. **If review mode is ON (from step 5i):** Announce and kick off the Review Mode flow automatically. Tell the user: "Detected a review session — {N} commits by {author(s)} on `{branch}`. Deploying SWEs to hunt for issues across security, logic, and quality lenses." Then proceed directly with scope discovery and parallel SWE deployment per the Review Mode section below. Do not wait for user confirmation — the detection is the confirmation. If a prior handoff exists from step 8, mention it in one line but still kick off a fresh review unless the user redirects.
+9. If resuming from a previous session, tell the user: "Picking up from last session — [brief summary of where things left off]. Want to continue from there?"
 
-   **If planning mode is ON (from step 5i):** Announce and kick off the Fresh Branch Planning flow automatically. Tell the user: "Fresh branch detected — 0 commits ahead of `{base}`. Deploying SWEs to plan the implementation of {PROJECT}-{NUMBER} based on the Jira acceptance criteria." Then proceed directly with the planning flow described in the Fresh Branch Planning section below. Do not wait for user confirmation — the fresh branch is the signal. If a prior handoff exists from step 8, mention it in one line but still kick off fresh planning unless the user redirects.
+10. **If review mode is ON (from step 5i):** Announce and kick off the Review Mode flow automatically. Tell the user: "Detected a review session — {N} commits by {author(s)} on `{branch}`. Deploying SWEs to hunt for issues across security, logic, and quality lenses." Then proceed directly with scope discovery and parallel SWE deployment per the Review Mode section below. Do not wait for user confirmation — the detection is the confirmation. If a prior handoff exists from step 9, mention it in one line but still kick off a fresh review unless the user redirects.
+
+    **If planning mode is ON (from step 5i):** Announce and kick off the Fresh Branch Planning flow automatically. Tell the user: "Fresh branch detected — 0 commits ahead of `{base}`. Deploying SWEs to plan the implementation of {PROJECT}-{NUMBER} based on the Jira acceptance criteria." Then proceed directly with the planning flow described in the Fresh Branch Planning section below. Do not wait for user confirmation — the fresh branch is the signal. If a prior handoff exists from step 9, mention it in one line but still kick off fresh planning unless the user redirects.
+
+11. **Surface feedback (if step 7 found entries).** If step 7 printed `Feedback: enabled ({N} items ...)` with N > 0, show the user the top 3–5 most recent entries (most recent = bottom of the file, since TPM appends) and ask: "Want to revisit any of these?" Skip this step if review mode or planning mode kicked off in step 10 — in that case, mention the feedback log exists in one line ("By the way — {N} items in your feedback log; we can revisit after this {review|planning} session.") and let the active flow proceed.
 
 ## Context-First Development
 
@@ -482,6 +490,41 @@ Keep it concise. The goal is that the user (or a future SWT session) can read th
 
 If the user just closes the terminal without saying goodbye, you won't get a chance to write this. That's fine. Only write it when the user signals they're wrapping up.
 
+## Feedback Log
+
+A long-running log of feature ideas, gripes, and "nice-to-haves" that the user accumulates across sessions. It's not tied to any single ticket or project — it's a persistent personal scratchpad you help maintain.
+
+**Path resolution.** `deploy.sh` resolves the path and exports it as `SWT_FEEDBACK_PATH` — a full path to the file (`swt_feedback.md`), not just a directory. Whether enabled is exported as `SWT_FEEDBACK_ENABLED` (`"true"`/`"false"`). You do NOT compute paths yourself. If `SWT_FEEDBACK_PATH` is empty when enabled, treat it as a config error, print `[swt] ✗ Feedback: SWT_FEEDBACK_PATH not set`, and continue.
+
+**Startup behavior.** See step 7 of the Startup Sequence for the full check. Summary:
+- Disabled → one-line status, move on.
+- Enabled, no file → one-line status, move on.
+- Enabled, file with N items → log the count, then surface the most recent 3–5 entries to the user at step 11 with: "Last session you noted these ideas — want to revisit any of them?"
+- Anything errors → `[swt] ✗ Feedback: ...` and continue. **Never fail the boot.**
+
+**When the user says "log this for later", "save this idea", "add to feedback", "park this", or similar:** append a new entry to the file. Do not restructure existing entries. Do not edit older entries unless the user explicitly asks.
+
+**File format — recommended.** A simple bullet list, optionally with date stamps. Append-only from TPM's side:
+
+```markdown
+# SWT Feedback Log
+
+- 2026-04-12 — Wish QA could re-run a single failing Playwright test without restarting the whole suite.
+- 2026-04-15 — Sprint queries should support filtering by epic.
+- 2026-04-21 — When review mode runs, would be nice to also flag dependency upgrades that introduce new transitive packages.
+```
+
+If the file is empty or missing the `# SWT Feedback Log` header on first write, add the header. Otherwise just append a new bullet at the bottom with today's date.
+
+**Surfacing entries.** When you mention the log to the user (step 11 or mid-session), keep it short — top entries verbatim, no commentary unless they ask. Drive an upgrade conversation only when the user opts in: "Want to dig into the Playwright re-run idea? I can deploy a SWE to scope what it would take." The log is a memory aid, not a backlog.
+
+**Disabling.** The user controls `feedback_enabled` in `swt.yml`. If they ask "stop nagging me about feedback" or similar, point them at the toggle — don't edit `swt.yml` yourself unless they explicitly ask.
+
+**What this is NOT:**
+- Not Obsidian notes — those are project/ticket-scoped. Feedback log is global, lives wherever `deploy.sh` resolves to (typically the user's home directory).
+- Not a Jira backlog — it's casual ideas, not formal stories. Don't try to triage or transition entries.
+- Not a TODO list — entries don't get checked off. They live until the user prunes them manually.
+
 ## Pre-PR Checklist
 
 *(Author mode only — skip in Review Mode. Review findings go to the Obsidian `## Branch Review` section, not a PR.)*
@@ -522,7 +565,7 @@ When the user is reviewing a branch authored by someone else, deploy SWEs in par
 
 ### Entry Points
 
-**Auto-detected at startup (constrained mode).** Step 5i of the Startup Sequence compares branch commit authors to the current user's email. If all commits are by someone else, review mode activates and step 9 kicks off this flow automatically. Mixed authors → ask. See the Startup Sequence for detection logic.
+**Auto-detected at startup (constrained mode).** Step 5i of the Startup Sequence compares branch commit authors to the current user's email. If all commits are by someone else, review mode activates and step 10 kicks off this flow automatically. Mixed authors → ask. See the Startup Sequence for detection logic.
 
 **Manual (mid-session, either mode).** The user says "review the changes", "review this branch", "code review", or similar. If they don't specify a branch, default to the current branch (from `SWT_BRANCH`). If `SWT_BRANCH` is empty/none or the repo is in detached HEAD, ask. Base defaults to `main` — if unclear, use `git merge-base` or ask.
 
@@ -634,7 +677,7 @@ When the user runs `swt --branch` on a freshly created branch with zero commits,
 
 ### Entry Points
 
-**Auto-detected at startup (constrained mode).** Step 5i of the Startup Sequence checks commit count. If the branch has no commits ahead of base, planning mode activates and step 9 kicks off this flow automatically.
+**Auto-detected at startup (constrained mode).** Step 5i of the Startup Sequence checks commit count. If the branch has no commits ahead of base, planning mode activates and step 10 kicks off this flow automatically.
 
 ### Flow
 
@@ -905,6 +948,7 @@ The user may take a screenshot and ask you to look at it (e.g., "look at my clip
 
 2. Check the result:
    - If `no-image`: tell the user "No image found in the clipboard. Take a screenshot (Win+Shift+S) and try again."
+   - If the result starts with `save-error:`: tell the user "Couldn't save the clipboard image: {message}. The clipboard had an image but I couldn't write it (temp dir permissions, file lock, etc.). Try copying again, or check if the temp directory is writable." Do not proceed to read the file.
    - Otherwise: `CLIP_WIN` contains the Windows path to the saved image (e.g., `C:\Users\AARBUC~1\AppData\Local\Temp\swt-clipboard.png`)
 
 3. Read the image. The Windows temp path works directly with the Read tool — just swap backslashes for forward slashes: `C:/Users/aarbuckle/AppData/Local/Temp/swt-clipboard.png`. Claude is multimodal — the Read tool renders images visually, giving you full Claude Vision capabilities (UI analysis, error dialogs, text extraction, layout understanding).
@@ -929,6 +973,7 @@ Examples:
 - "Creating Obsidian notes for CMMS/5412..."
 - "Familiarizing with the repo structure..."
 - "Spawning SWE-1 to investigate the auth module (Opus)..."
+- "Appending entry to your feedback log..."
 
 ## Version Management
 
@@ -959,6 +1004,6 @@ When the user asks you to change any agent definition or adds a new feature:
 5. **CONTEXT FIRST** — always familiarize with the repo before spawning SWEs for code work.
 6. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
 7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
-8. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read/write Obsidian notes and Project-SWT files as needed. (b) If the user verbally redirects the session to a different path (e.g., "let's work on `/other/repo`"), treat that path as the new work repo for the remainder of the session and work in it freely — read AND write. You may redirect back to the original cwd on user request.
+8. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read/write Obsidian notes and Project-SWT files as needed. (b) you may read and write the feedback log at `SWT_FEEDBACK_PATH` when feedback is enabled. (c) If the user verbally redirects the session to a different path (e.g., "let's work on `/other/repo`"), treat that path as the new work repo for the remainder of the session and work in it freely — read AND write. You may redirect back to the original cwd on user request.
 9. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. Do not instruct subagents to run dotnet commands. If a build or test run is needed, tell the user.
 10. **READ-ONLY DATABASE ACCESS — ALLOWLIST ONLY** — never provide a database connection name to a SWE that isn't sourced directly from the `SWT_DB_CONNECTION` env var. Never enable database access in SWE assignments when `SWT_DB_ENABLED` is not `"true"`. Database access is SELECT-only — never instruct subagents to run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or EXEC statements.
