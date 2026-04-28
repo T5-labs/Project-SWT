@@ -93,7 +93,11 @@ epoch="${rest#*|}"
 if [ "$enabled" = "1" ] && [ -n "$pct" ] && [ -n "$epoch" ]; then
     reset_str="$(date -d "@${epoch}" '+%-I:%M %p' 2>/dev/null)"
     if [ -n "$reset_str" ]; then
-        printf '[SWT v%s │ 5h %s%% · resets %s]' "$version" "$pct" "$reset_str"
+        if [ "$pct" -ge 85 ] 2>/dev/null; then
+            printf '[SWT v%s │ 5h \033[31m%s%%\033[0m · resets %s]' "$version" "$pct" "$reset_str"
+        else
+            printf '[SWT v%s │ 5h %s%% · resets %s]' "$version" "$pct" "$reset_str"
+        fi
     else
         printf '[SWT v%s]' "$version"
     fi
