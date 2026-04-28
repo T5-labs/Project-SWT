@@ -109,7 +109,7 @@ Print each status line as you complete it using this exact format — `[swt]` pr
 8. **Support repos check.** Read `SWT_SUPPORT_ENABLED` and `SWT_SUPPORT_MODE` from env. Support data now lives inside the unified settings file at `SWT_SETTINGS_PATH` (under the `support` key) — `SWT_SUPPORT_PATH` is preserved for backward compatibility and points at the same file as `SWT_SETTINGS_PATH`. `deploy.sh` resolves both — do NOT compute paths yourself.
    - If `SWT_SUPPORT_ENABLED` is not `"true"`: print `[swt] ✓ Support: disabled` and continue.
    - If `SWT_SUPPORT_ENABLED == "true"` and the file at `SWT_SETTINGS_PATH` does not exist: print `[swt] ✓ Support: enabled (settings file pending creation by deploy.sh)` and continue. This should be rare — `deploy.sh` is responsible for creating/migrating the settings file.
-   - If `SWT_SUPPORT_ENABLED == "true"` and the file exists: read it, parse JSON, inspect `support.repos` (an object keyed by app name with string-or-null values) and `support.apps` (the canonical app list). Count `mapped` = number of keys in `support.repos` whose value is a non-null, non-empty string; `total` = number of entries in `support.apps` (or, equivalently, the number of keys in `support.repos`). Print `[swt] ✓ Support: enabled ({mapped}/{total} apps mapped)`.
+   - If `SWT_SUPPORT_ENABLED == "true"` and the file exists: read it, parse JSON, inspect `support.apps` (an object keyed by app name with string-or-null values — schema v2). Count `mapped` = number of keys in `support.apps` whose value is a non-null, non-empty string; `total` = number of keys in `support.apps`. Print `[swt] ✓ Support: enabled ({mapped}/{total} apps mapped)`. If you encounter the legacy v1 shape (separate `support.apps[]` array plus `support.repos{}` map), `deploy.sh` should have migrated it before TPM booted — if you still see v1, treat it as best-effort: read `support.repos` instead, print the count, and note in your status line that the file looks pre-migration.
    - If `SWT_SUPPORT_MODE == "true"` (the user passed `--support` on this boot), additionally print `[swt] ✓ Support mode: ON ({mapped}/{total} apps mapped)`. This signals that the entire session is dedicated to support work — see the Support Mode section.
    - **This step must NEVER fail the boot.** If anything goes wrong (read error, malformed JSON, missing key, env var unset when expected, etc.), print `[swt] ✗ Support: {short reason}` and continue to the next step. The support repos data is best-effort context, not a critical dependency.
 
@@ -504,23 +504,23 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 ## Settings File
 
-`swt_settings.json` is the **single source of truth** for user-tunable configuration AND accumulated session data (feedback entries, support repo paths). It supersedes the legacy `swt.yml` and the standalone `swt_feedback.md` / `swt_support.md` files.
+`swt_settings.json` is the **single source of truth** for user-tunable configuration AND accumulated session data (feedback entries, support app paths). It supersedes the legacy `swt.yml` and the standalone `swt_feedback.md` / `swt_support.md` files.
 
 **Path resolution.** `deploy.sh` resolves the file location (typically the user's Windows home directory) and exports it as `SWT_SETTINGS_PATH`. The legacy env vars `SWT_FEEDBACK_PATH` and `SWT_SUPPORT_PATH` are preserved for backward compatibility — they now point at the same file as `SWT_SETTINGS_PATH`. You do NOT compute paths yourself.
 
 **Top-level schema keys:**
-- `_schema` — schema version number (currently `1`). Future migrations bump this.
+- `_schema` — schema version number (currently `2`). Future migrations bump this.
 - `team` — core allocation (`swe_count`, `swe_efficiency_cores`, `swe_performance_cores`, `qa_count`).
 - `atlassian` — `cloud_id`, `site`, `board_id`, `board_url`.
 - `paths` — `obsidian_base`, `edge_profile`, `lprun`.
 - `playwright` — `headless` (boolean).
 - `database` — `enabled` (boolean), `allowlist` (object mapping project key → connection name).
 - `feedback` — `enabled` (boolean), `entries[]` (array of `{"date": "YYYY-MM-DD", "text": "..."}`).
-- `support` — `enabled` (boolean), `apps[]` (canonical app list), `search_roots[]`, `repos{}` (object keyed by app name → path-or-null).
+- `support` — `enabled` (boolean), `apps{}` (object keyed by app name → path-or-null). Curated search roots used for boot-time discovery are hardcoded in `deploy.sh` and are not stored here.
 
 **TPM's interaction model.**
 - **Read on startup.** Steps 7 and 8 of the Startup Sequence read `feedback` and `support` from this file. The other top-level keys (`team`, `atlassian`, etc.) are consumed via env vars that `deploy.sh` exports — TPM does NOT re-parse them from JSON.
-- **Append-only edits for accumulated data.** `feedback.entries[]` and `support.repos.<APP>` are the only fields TPM writes to during normal session work (when the user says "log this idea" or provides a missing repo path). Treat the rest of the file as read-only unless the user explicitly asks to change a config value.
+- **Append-only edits for accumulated data.** `feedback.entries[]` and `support.apps.<APP>` are the only fields TPM writes to during normal session work (when the user says "log this idea" or provides a missing repo path). Treat the rest of the file as read-only unless the user explicitly asks to change a config value.
 - **Configuration changes.** Users can edit the JSON directly OR ask conversationally ("set headless to true"). When they ask, locate the field, update it via Read+Edit (or read+modify+Write for trickier nested updates), and confirm the change back to the user.
 
 **Editing JSON safely.** TPM does NOT have JSON-aware tools. Two viable patterns:
@@ -529,9 +529,9 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 Either way: **never lose existing data**. If you're unsure the edit will land cleanly, prefer Read+Write over Edit.
 
-**Schema versioning.** `_schema: 1` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. Future migrations may bump this and require migration logic in TPM or `deploy.sh`.
+**Schema versioning.** `_schema: 2` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map) and writes a `${SWT_SETTINGS_PATH}.v1.bak` backup before rewriting, so the user always has a recovery path. Future schema bumps follow the same pattern.
 
-**One-time migration messaging.** On first boot after the upgrade to `swt_settings.json`, `deploy.sh` migrates any existing `swt_feedback.md` / `swt_support.md` content into the new JSON and sets `SWT_SETTINGS_MIGRATED=true`. TPM checks this env var at step 13 of the Startup Sequence and surfaces the migration message on that boot only — see step 13 for the exact check and message. If `SWT_SETTINGS_MIGRATED` is not `"true"`, do not surface this message.
+**One-time migration messaging.** On first boot after the upgrade to `swt_settings.json`, `deploy.sh` migrates any existing `swt_feedback.md` / `swt_support.md` content into the new JSON and sets `SWT_SETTINGS_MIGRATED=true`. TPM checks this env var at step 13 of the Startup Sequence and surfaces the migration message on that boot only — see step 13 for the exact check and message. If `SWT_SETTINGS_MIGRATED` is not `"true"`, do not surface this message. Schema bumps within `swt_settings.json` (e.g., v1 → v2) are handled by `deploy.sh` quietly and leave a `${SWT_SETTINGS_PATH}.v1.bak` backup in place.
 
 ## Feedback Log
 
@@ -566,6 +566,7 @@ A long-running log of feature ideas, gripes, and "nice-to-haves" that the user a
 1. **Read+Write.** Read `swt_settings.json`, parse the JSON in memory, append the new object to `feedback.entries`, Write the entire file back. Preserve indentation and key order.
 2. **Edit with a precise target.** Locate the closing `]` of the `entries` array (the unique surrounding context is the trailing `]` immediately before the next sibling key like `},\n  "support":`). Insert the new object before that closing bracket. Mind the trailing comma — if `entries` already has items, append a comma after the previous last item; if `entries` is empty, no comma.
 
+
 When in doubt, Read+Write is safer. Never lose existing entries.
 
 **Surfacing entries.** When you mention the log to the user (step 12 or mid-session), keep it short — render each entry as `{date} — {text}`, no commentary unless they ask. Drive an upgrade conversation only when the user opts in: "Want to dig into the Playwright re-run idea? I can deploy a SWE to scope what it would take." The log is a memory aid, not a backlog.
@@ -583,15 +584,13 @@ A session-modality dedicated to answering support questions across the apps the 
 
 **Path resolution.** `deploy.sh` resolves the unified settings file and exports it as `SWT_SETTINGS_PATH` (preferred) and `SWT_SUPPORT_PATH` (backward-compat alias — same file). Whether enabled is exported as `SWT_SUPPORT_ENABLED` (`"true"`/`"false"`). Whether the user invoked support mode this boot is exported as `SWT_SUPPORT_MODE` (`"true"`/`"false"`). You do NOT compute paths yourself.
 
-**The support data.** Stored inside `swt_settings.json` under the `support` key. `deploy.sh` writes and maintains it during discovery; you read it on every boot (step 8) and may UPDATE individual entries in `support.repos` when the user provides a new path mid-session. You do NOT restructure or reorder the JSON. Shape:
+**The support data.** Stored inside `swt_settings.json` under the `support` key. `deploy.sh` writes and maintains it during discovery; you read it on every boot (step 8) and may UPDATE individual entries in `support.apps` when the user provides a new path mid-session. You do NOT restructure or reorder the JSON. Shape (schema v2):
 
 ```json
 {
   "support": {
     "enabled": true,
-    "apps": ["CMMS", "HITS", "TPS", "MCP"],
-    "search_roots": ["C:\\Users\\%USERNAME%\\source\\repos", "..."],
-    "repos": {
+    "apps": {
       "CMMS": "/mnt/c/Users/aarbuckle/source/repos/CMMS",
       "HITS": null,
       "TPS": "/mnt/c/Users/aarbuckle/Documents/TPS",
@@ -601,7 +600,20 @@ A session-modality dedicated to answering support questions across the apps the 
 }
 ```
 
-An entry in `support.repos` is **mapped** if its value is a non-null, non-empty string. `null` (or absent) means unmapped — `deploy.sh` will attempt re-discovery on next boot.
+An entry in `support.apps` is **mapped** if its value is a non-null, non-empty string. `null` (or absent) means unmapped — `deploy.sh` will attempt re-discovery on the next `--support` boot. The legacy v1 shape (separate `apps[]`, `search_roots[]`, and `repos{}` keys) is auto-migrated by `deploy.sh`, which leaves a `${SWT_SETTINGS_PATH}.v1.bak` backup behind on first migration.
+
+**Boot-time auto-discovery (only when `SWT_SUPPORT_MODE=true`).** When the user invokes `swt --support`, `deploy.sh` walks `support.apps` and, for every entry whose value is `null`, attempts to locate the project on disk. Discovery rules:
+
+| Step | Behavior |
+|------|----------|
+| 1. Curated roots | Searches `/mnt/c/Users/$USER`, `/mnt/c/dev`, `/mnt/c/Projects`, `/mnt/c/Source` first (max-depth 4, pruning AppData / `AppData.*` / node_modules / .git / `$Recycle.Bin`). |
+| 2. C-drive fallback | If no curated match, runs a depth-limited (max-depth 6) C-drive scan with a 15s timeout, pruning Windows / Program Files / AppData / `$Recycle.Bin` / System Volume Information / node_modules / .git / similar noise. |
+| 3. Match criteria | Directory name matches the app key case-insensitively AND contains a `.git/` subdir. |
+| 4. Tie-break | Multiple candidates → picks the one with the most recent commit (`git log -1 --format=%ct`). |
+| 5. Write-back | Found paths are written back to `support.apps.<APP>` in `swt_settings.json`. |
+| 6. Status line | Prints `[swt] discovered <APP> at <path>` on success, `[swt] could not discover <APP> (no match)` on miss, `[swt] could not discover <APP> (search timed out)` if the C-drive scan times out, or `[swt] could not discover <APP> (search error)` on an unexpected `find` failure. |
+
+Discovery is best-effort and **never fails the boot.** TPM does not run discovery itself — it just reads the resulting `support.apps` map at step 8. If the user asks "what changed?" in the support-mode greeting, mention any apps `deploy.sh` discovered this boot (the `[swt] discovered ...` lines are visible in the boot output).
 
 **Startup announcement (when `SWT_SUPPORT_MODE=true`).** After step 11 fires the support-mode kickoff, greet the user with the mapping summary and an open invitation. Example: "Support mode is on. You have 3 of 4 apps mapped: CMMS, HITS, TPS. MCP doesn't have a path set yet — give me the path when you're ready, or skip if not needed today. What can I help with?"
 
@@ -629,7 +641,7 @@ An entry in `support.repos` is **mapped** if its value is a non-null, non-empty 
 
 5. **Pivoting between apps.** When the user says "now let's look at TPS..." or otherwise switches apps, TPM switches the active work repo to that app's path and starts a fresh investigation. Each pivot resets the active path; SWEs deployed for the new app should be told the new path explicitly.
 
-**Mid-session path updates.** If the user provides a path for an unmapped app ("HITS is at `/path/to/hits`") or corrects an existing one ("the TPS path moved to `/new/path`"), update the corresponding key in `support.repos` inside `swt_settings.json`. Use Read+Write to preserve the rest of the JSON, or use Edit with a precise target string. Keep it surgical — change ONLY the value for the named app; never reorder keys or touch other sections. If the user asks you to forget a path (repo moved and they'll re-discover next boot), set the value to `null` so `deploy.sh` re-discovers it on the next boot — do NOT remove the key entirely.
+**Mid-session path updates.** If the user provides a path for an unmapped app ("HITS is at `/path/to/hits`") or corrects an existing one ("the TPS path moved to `/new/path`"), update the corresponding key in `support.apps` inside `swt_settings.json`. Use Read+Write to preserve the rest of the JSON, or use Edit with a precise target string. Keep it surgical — change ONLY the value for the named app; never reorder keys or touch other sections. If the user asks you to forget a path (repo moved and they'll re-discover next boot), set the value to `null` so `deploy.sh` re-discovers it on the next `--support` boot — do NOT remove the key entirely.
 
 **What support mode is NOT:**
 - **Not Jira-scoped.** No `SWT_TICKET`, no per-ticket Obsidian notes. (You may write a `Support/<APP>.md` knowledge file in Obsidian if the user wants persistent learnings — but this is opt-in.)
@@ -641,7 +653,7 @@ An entry in `support.repos` is **mapped** if its value is a non-null, non-empty 
 
 **Disabling.** The user controls `support.enabled` (in `swt_settings.json`). If they ask "turn off support", you can flip the flag for them via Read+Write (or point them at the file) — don't change it implicitly without confirmation.
 
-**Re-discovery.** If a path in `support.repos` is wrong (repo moved), the user (or TPM, on user request) can set the value to `null` and `deploy.sh` will re-discover it on the next boot. You can also be asked to update a path mid-session (see above).
+**Re-discovery.** Boot-time auto-discovery already runs for every `null` entry on every `swt --support` boot, so the simplest reset is to set a stale path to `null` and re-launch with `--support`. The user (or TPM, on user request) can null an entry mid-session, and `deploy.sh` will re-attempt discovery on the next `--support` boot. You can also be asked to update a path mid-session (see above) — that's the right move when the user already knows where the repo lives.
 
 ## Pre-PR Checklist
 
@@ -1081,6 +1093,47 @@ The user may take a screenshot and ask you to look at it (e.g., "look at my clip
 
 **The temp file** (`swt-clipboard.png`) is overwritten each time. No cleanup needed.
 
+## Statusline Display
+
+The Claude Code statusline renders a single line beneath the prompt on every turn. SWT plugs into it to show the current version and (when available) the user's 5-hour usage window, so the user always knows which SWT they're talking to and how much runway they have left.
+
+**The script.** `${SWT_DIR}/scripts/swt-statusline.sh` is a bash script that reads the harness payload from stdin (JSON), reads `swt_settings.json` to check whether the statusline is enabled, and emits a single line on stdout. Dependencies are bash + python3 — `jq` is NOT used (it's not installed in WSL). The script never fails: every error path falls back silently to the short form.
+
+**The toggle.** `swt_settings.json` → `statusline.enabled` (boolean). Treat this exactly like the other accumulated-data fields (`feedback.enabled`, `support.enabled`) — flip via Read+Write when the user asks. Do not change it implicitly.
+
+```json
+{
+  "statusline": {
+    "enabled": true
+  }
+}
+```
+
+**Wiring.** The harness invokes the script via `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "/absolute/path/to/Project-SWT/scripts/swt-statusline.sh"
+  }
+}
+```
+
+This is a one-time install step done with the `update-config` skill or a direct edit to `~/.claude/settings.json`. Once wired, the harness pipes its JSON payload to the script on every prompt and renders the script's stdout as the statusline.
+
+**Behavior matrix.**
+
+| Condition | Output |
+|-----------|--------|
+| `statusline.enabled = true` AND `rate_limits.five_hour` present in payload | `[SWT vX.Y.Z │ 5h 47% · resets 7:32 PM]` |
+| `statusline.enabled = true` AND `rate_limits` absent (early session, API-key auth, non-Pro/Max plan) | `[SWT vX.Y.Z]` |
+| `statusline.enabled = false` | `[SWT vX.Y.Z]` |
+| `swt_settings.json` unreadable or any error in the script | `[SWT vX.Y.Z]` (silent fallback — no error text leaks) |
+
+**Caveat.** `rate_limits` is a Claude.ai Pro/Max-only field in the harness payload. API-key users will always see the version-only form regardless of the toggle — this is expected, not a bug.
+
+**Conversational enable/disable.** When the user says "turn on the statusline", "show my usage in the statusline", "turn off the statusline", or similar — flip `statusline.enabled` in `swt_settings.json` via Read+Write (preserve the rest of the file) and confirm the change back to the user. If the `statusline` block doesn't exist yet, add it. The change takes effect on the next prompt the harness renders — no restart needed.
+
 ## Verbose Output
 
 Always narrate what you're doing. The user values feedback over silence.
@@ -1122,6 +1175,6 @@ When the user asks you to change any agent definition or adds a new feature:
 5. **CONTEXT FIRST** — always familiarize with the repo before spawning SWEs for code work.
 6. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
 7. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
-8. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read/write Obsidian notes and Project-SWT files as needed. (b) you may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support repos map, plus the rest of user config). (c) If the user verbally redirects the session to a different path (e.g., "let's work on `/other/repo`"), treat that path as the new work repo for the remainder of the session and work in it freely — read AND write. You may redirect back to the original cwd on user request. In support mode, this redirect exception covers each app path listed in `support.repos` — pivoting to another app's path is a fresh redirect under this same clause.
+8. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read/write Obsidian notes and Project-SWT files as needed. (b) you may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support apps map, plus the rest of user config). (c) If the user verbally redirects the session to a different path (e.g., "let's work on `/other/repo`"), treat that path as the new work repo for the remainder of the session and work in it freely — read AND write. You may redirect back to the original cwd on user request. In support mode, this redirect exception covers each app path listed in `support.apps` — pivoting to another app's path is a fresh redirect under this same clause.
 9. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. Do not instruct subagents to run dotnet commands. If a build or test run is needed, tell the user.
 10. **READ-ONLY DATABASE ACCESS — ALLOWLIST ONLY** — never provide a database connection name to a SWE that isn't sourced directly from the `SWT_DB_CONNECTION` env var (which itself comes from the `database.allowlist` in `swt_settings.json`). Never enable database access in SWE assignments when `SWT_DB_ENABLED` is not `"true"`. Database access is SELECT-only — never instruct subagents to run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or EXEC statements.

@@ -506,7 +506,7 @@ for raw in os.environ.get('SUPPORT_MD', '').splitlines():
         repos[app] = val
 
 doc = {
-    "_schema": 1,
+    "_schema": 2,
     "team": {
         "swe_count": _int(os.environ.get('SEED_SWE_COUNT'), 3),
         "swe_efficiency_cores": _int(os.environ.get('SEED_SWE_EFF'), 1),
@@ -537,9 +537,10 @@ doc = {
     },
     "support": {
         "enabled": _bool(os.environ.get('SEED_SUPPORT_ENABLED'), True),
-        "apps": apps,
-        "search_roots": roots,
-        "repos": repos,
+        "apps": repos,
+    },
+    "statusline": {
+        "enabled": False,
     },
 }
 
@@ -560,6 +561,110 @@ PY
 }
 
 _ensure_settings_file || true
+
+# ── Schema Migration (v1 → v2) ────────────────────────────────────
+# v2 collapses support.{apps[], search_roots[], repos{}} into a single
+# support.apps{} map (APP → path|null) and bumps _schema to 2. Runs in-place
+# on an existing settings file; no-op if already on v2 (or higher), if the
+# file is missing, or if the JSON is malformed. Never fails the boot.
+_migrate_settings_schema() {
+    [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ] || return 0
+
+    SWT_SETTINGS_PATH="$SWT_SETTINGS_PATH" python3 - <<'PY' 2>/dev/null
+import json, os, shutil, sys, tempfile
+
+path = os.environ.get('SWT_SETTINGS_PATH', '')
+if not path:
+    sys.exit(0)
+
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except Exception:
+    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
+    sys.exit(0)
+
+if not isinstance(data, dict):
+    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
+    sys.exit(0)
+
+schema = data.get('_schema')
+support = data.get('support')
+
+# Detect v1-shaped support: array apps, or presence of search_roots/repos.
+v1_shape = (
+    isinstance(support, dict) and (
+        isinstance(support.get('apps'), list)
+        or 'search_roots' in support
+        or 'repos' in support
+    )
+)
+
+if schema == 1 and v1_shape:
+    # Backup the v1 file before mutating (only if no backup exists yet).
+    backup_path = path + '.v1.bak'
+    if not os.path.exists(backup_path):
+        try:
+            shutil.copy2(path, backup_path)
+        except Exception as e:
+            print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
+
+    old_apps = support.get('apps') or []
+    old_repos = support.get('repos') or {}
+    new_apps_map = {}
+    if isinstance(old_apps, list):
+        for app in old_apps:
+            if not app:
+                continue
+            new_apps_map[app] = old_repos.get(app, None) if isinstance(old_repos, dict) else None
+    elif isinstance(old_apps, dict):
+        # Defensive: if apps is somehow already an object, preserve it as-is.
+        new_apps_map = old_apps
+
+    data['support'] = {
+        'enabled': support.get('enabled', True),
+        'apps': new_apps_map,
+    }
+    data['_schema'] = 2
+
+    # Atomic write via temp file in the same directory + rename.
+    out_dir = os.path.dirname(path) or '.'
+    fd, tmp = tempfile.mkstemp(prefix='.swt_settings.', suffix='.tmp', dir=out_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
+        sys.exit(0)
+
+    print(f"[swt] migrated swt_settings.json schema 1 → 2 (backup: {backup_path})")
+    print('__SWT_SCHEMA_MIGRATED__')
+elif schema in (None, ) or not isinstance(schema, int):
+    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
+# else: schema >= 2 → silent no-op
+PY
+}
+
+# Capture migration output so we can detect the schema-migrated marker and
+# fold it into SWT_SETTINGS_MIGRATED. The marker line is consumed; everything
+# else (banner + warnings) is forwarded to the user verbatim.
+_migration_output="$(_migrate_settings_schema 2>&1 || true)"
+if [ -n "$_migration_output" ]; then
+    while IFS= read -r _mline; do
+        if [ "$_mline" = "__SWT_SCHEMA_MIGRATED__" ]; then
+            _SWT_SETTINGS_MIGRATED="true"
+        else
+            echo "$_mline"
+        fi
+    done <<< "$_migration_output"
+fi
+unset _migration_output
 
 # ── Agent Team Configuration ───────────────────────────────────────
 # Read team-size knobs from swt_settings.json (with sensible defaults). Falls
@@ -783,10 +888,12 @@ else
 fi
 
 # ── Resolve Support Config ───────────────────────────────────────
-# Support data lives in swt_settings.json under support.{apps, search_roots, repos}.
-# SWT_SUPPORT_PATH is preserved for backward compat — points at the unified file.
-# Discovery still runs every boot (incremental) — for any app whose repo path is
-# null, scan support.search_roots and write the result back to support.repos.
+# Support data lives in swt_settings.json under support.{enabled, apps{}}.
+# support.apps is an APP → path|null map. SWT_SUPPORT_PATH is preserved for
+# backward compat — it points at the unified settings file.
+# Discovery runs only when --support is passed (SWT_SUPPORT_MODE=true): for any
+# app whose path is null, scan curated dev roots (and a depth-limited C-drive
+# fallback) and write the result back into support.apps.
 SUPPORT_ENABLED_RAW="$(_json_get "$SWT_SETTINGS_PATH" support.enabled)"
 if [ "${SUPPORT_ENABLED_RAW:-true}" = "false" ]; then
     export SWT_SUPPORT_ENABLED="false"
@@ -807,66 +914,124 @@ else
     export SWT_SUPPORT_MODE="false"
 fi
 
-# Incremental discovery: scan support.search_roots for any app whose repo path
-# is null in support.repos, and write the discovered path back to the JSON.
-# Runs on every boot when support is enabled. Never fails the boot.
-_discover_support_repos() {
+# Incremental discovery: for any app whose repo path is null in support.apps,
+# search a curated set of common dev roots, then fall back to a depth-limited
+# C-drive scan. Runs only when support mode is active (--support). Never fails
+# the boot — every error path produces a single warning line and continues.
+_discover_support_apps() {
+    [ "$SWT_SUPPORT_MODE" = "true" ] || return 0
     [ "$SWT_SUPPORT_ENABLED" = "true" ] || return 0
     [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ] || return 0
 
-    # Pull the configured app list and search roots from JSON.
-    local apps_list roots_list
-    apps_list="$(_json_get_array "$SWT_SETTINGS_PATH" support.apps)"
-    roots_list="$(_json_get_array "$SWT_SETTINGS_PATH" support.search_roots)"
-
-    # Resolve search roots — expand %USERNAME% and convert Windows paths to native.
-    local resolved_roots=()
-    local raw_root native_root expanded
-    while IFS= read -r raw_root; do
-        [ -n "$raw_root" ] || continue
-        expanded="${raw_root//%USERNAME%/$WIN_USER}"
-        native_root=$(to_native_path "$expanded")
-        if [ -n "$native_root" ] && [ -d "$native_root" ]; then
-            resolved_roots+=("$native_root")
+    # Curated roots — only those that exist on disk. WIN_USER feeds the Windows
+    # home path under WSL; if it's empty, that root simply won't resolve.
+    # /mnt/c/Users/$USER comes first because users frequently keep repos directly
+    # under their home (subsumes the older source/repos and Documents entries at
+    # maxdepth 4). /mnt/c/dev, /mnt/c/Projects, /mnt/c/Source are alternate
+    # common dev roots outside the user home.
+    local curated_candidates=(
+        "/mnt/c/Users/${WIN_USER}"
+        "/mnt/c/dev"
+        "/mnt/c/Projects"
+        "/mnt/c/Source"
+    )
+    local curated_roots=()
+    local root
+    for root in "${curated_candidates[@]}"; do
+        [ -n "$root" ] || continue
+        if [ -d "$root" ]; then
+            curated_roots+=("$root")
         fi
-    done <<< "$roots_list"
+    done
 
-    # For each app: if support.repos.<APP> is already set (non-null/non-empty), skip.
-    # Otherwise search and write the result (or null) back into support.repos.
-    local app current match
+    # Iterate apps: only attempt discovery for apps whose value is null.
+    local app current
     while IFS= read -r app; do
         [ -n "$app" ] || continue
-        current="$(_json_get "$SWT_SETTINGS_PATH" "support.repos.${app}")"
+        current="$(_json_get "$SWT_SETTINGS_PATH" "support.apps.${app}")"
         if [ -n "$current" ]; then
             continue
         fi
 
+        # Stage 1 — curated roots. Collect matches that have a .git/ subdir.
+        # Prune AppData / node_modules / .git / $Recycle.Bin uniformly across all
+        # curated roots — the prune cost is negligible when the directories
+        # don't exist, and it keeps the scan bounded when the root is the user
+        # home (which contains plenty of noisy subtrees).
         local matches=()
-        local root
-        for root in "${resolved_roots[@]}"; do
-            # Case-insensitive search up to 4 dirs deep; verify .git presence.
+        local match
+        for root in "${curated_roots[@]}"; do
             while IFS= read -r match; do
                 [ -n "$match" ] || continue
                 if [ -d "${match}/.git" ]; then
                     matches+=("$match")
                 fi
-            done < <({ find "$root" -maxdepth 4 -type d -iname "$app" 2>/dev/null || true; })
+            done < <({ find "$root" -maxdepth 4 -type d \
+                \( -iname AppData -o -iname 'AppData.*' -o -iname node_modules \
+                   -o -iname .git -o -iname '$Recycle.Bin' \) -prune -o \
+                -type d -iname "$app" -print 2>/dev/null || true; })
         done
 
-        if [ "${#matches[@]}" -gt 0 ]; then
-            local found="${matches[0]}"
-            if [ "${#matches[@]}" -gt 1 ]; then
-                echo "[swt] ⚠ Support: multiple matches for ${app}, picked ${found}"
+        # Stage 2 — depth-limited C-drive fallback if curated yielded nothing.
+        # Capture rc via "|| rc=$?" so set -e doesn't trip when the find/timeout
+        # exits non-zero (124 on timeout is the expected case to handle).
+        local stage2_status="ok"
+        if [ "${#matches[@]}" -eq 0 ] && [ -d "/mnt/c" ]; then
+            local fallback_output="" rc=0
+            fallback_output="$(timeout 15 find /mnt/c -maxdepth 6 -type d \
+                \( -iname Windows -o -iname 'Program Files*' -o -iname AppData \
+                   -o -iname '$Recycle.Bin' -o -iname 'System Volume Information' \
+                   -o -iname node_modules -o -iname '.git' \) -prune \
+                -o -type d -iname "$app" -print 2>/dev/null)" || rc=$?
+            if [ "$rc" -eq 124 ]; then
+                stage2_status="timeout"
+            elif [ "$rc" -ne 0 ]; then
+                stage2_status="error"
             fi
-            _json_object_set "$SWT_SETTINGS_PATH" "support.repos" "$app" "$found" || true
-        else
-            # Already null (or missing) — make it explicit so the file shape is stable.
-            _json_object_set "$SWT_SETTINGS_PATH" "support.repos" "$app" "null" || true
+            if [ "$stage2_status" = "ok" ] && [ -n "$fallback_output" ]; then
+                while IFS= read -r match; do
+                    [ -n "$match" ] || continue
+                    if [ -d "${match}/.git" ]; then
+                        matches+=("$match")
+                    fi
+                done <<< "$fallback_output"
+            fi
         fi
-    done <<< "$apps_list"
+
+        # Pick the best candidate by most-recent commit time. Treat git failures
+        # as commit_time=0 so a non-git or broken candidate doesn't crash the loop.
+        local found=""
+        if [ "${#matches[@]}" -gt 0 ]; then
+            if [ "${#matches[@]}" -eq 1 ]; then
+                found="${matches[0]}"
+            else
+                local best="" best_ts=-1 candidate ts
+                for candidate in "${matches[@]}"; do
+                    ts="$(git -C "$candidate" log -1 --format=%ct 2>/dev/null || echo 0)"
+                    [ -n "$ts" ] || ts=0
+                    if [ "$ts" -gt "$best_ts" ] 2>/dev/null; then
+                        best_ts="$ts"
+                        best="$candidate"
+                    fi
+                done
+                found="$best"
+            fi
+        fi
+
+        if [ -n "$found" ]; then
+            _json_object_set "$SWT_SETTINGS_PATH" "support.apps" "$app" "$found" || true
+            echo "[swt] discovered ${app} at ${found}"
+        else
+            case "$stage2_status" in
+                timeout) echo "[swt] could not discover ${app} (search timed out)" ;;
+                error)   echo "[swt] could not discover ${app} (search error)" ;;
+                *)       echo "[swt] could not discover ${app} (no match)" ;;
+            esac
+        fi
+    done <<< "$(_json_get_keys "$SWT_SETTINGS_PATH" support.apps)"
 }
 
-_discover_support_repos || true
+_discover_support_apps || true
 
 # ── Resolve Board Config ────────────────────────────────────────
 SWT_BOARD_URL="$(_json_get "$SWT_SETTINGS_PATH" atlassian.board_url)"
@@ -914,17 +1079,17 @@ if [ "$SWT_SUPPORT_ENABLED" = "true" ]; then
     SUPPORT_MAPPED=0
     SUPPORT_TOTAL=0
     if [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ]; then
-        SUPPORT_TOTAL="$(_json_get_keys "$SWT_SETTINGS_PATH" support.repos | { grep -c . 2>/dev/null || true; } | head -n1)"
+        SUPPORT_TOTAL="$(_json_get_keys "$SWT_SETTINGS_PATH" support.apps | { grep -c . 2>/dev/null || true; } | head -n1)"
         SUPPORT_TOTAL="${SUPPORT_TOTAL:-0}"
-        # _json_get_array on the repos object would skip nulls; instead iterate keys
-        # and count non-null values via _json_get.
+        # support.apps is now an object (APP → path|null). Iterate keys and
+        # count non-null/non-empty values to compute the mapped tally.
         SUPPORT_MAPPED=0
         while IFS= read -r _app; do
             [ -n "$_app" ] || continue
-            if [ -n "$(_json_get "$SWT_SETTINGS_PATH" "support.repos.${_app}")" ]; then
+            if [ -n "$(_json_get "$SWT_SETTINGS_PATH" "support.apps.${_app}")" ]; then
                 SUPPORT_MAPPED=$((SUPPORT_MAPPED + 1))
             fi
-        done <<< "$(_json_get_keys "$SWT_SETTINGS_PATH" support.repos)"
+        done <<< "$(_json_get_keys "$SWT_SETTINGS_PATH" support.apps)"
     fi
     if [ "$SWT_SUPPORT_MODE" = "true" ]; then
         INFO_SUPPORT="Support: ON (mode active, ${SUPPORT_MAPPED}/${SUPPORT_TOTAL} apps mapped)"

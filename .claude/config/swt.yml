@@ -48,11 +48,16 @@ feedback_path: ""
 #   `find <root> -maxdepth 4 -type d -iname '<APP>'` and picks the first match
 #   that contains a .git subdirectory.
 # → swt_settings.json: support.enabled
-# → swt_settings.json: support.apps[]
-# → swt_settings.json: support.search_roots[]
+# → swt_settings.json: support.apps[]          (v1 shape — see migration note below)
+# → swt_settings.json: support.search_roots[]  (v1 shape — see migration note below)
 # → support_path is no longer used at runtime — support data now lives inline
 #   in swt_settings.json under support.repos{}. The legacy swt_support.md file
 #   (if present) is migrated into the JSON on first boot.
+# → The keys above describe the v1 shape this seed produces. The current target
+#   is schema v2 (`support.apps{}` map, no `search_roots`). On first boot,
+#   deploy.sh seeds from this file in v1 shape, then immediately runs its v1→v2
+#   migration to produce the v2 swt_settings.json. Do not restructure this file
+#   — the v1 shape is intentional, since the seed is read only once.
 support_enabled: true
 support_path: ""
 support_apps: [CMMS, HITS, TPS, MCP]

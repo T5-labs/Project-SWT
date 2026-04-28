@@ -132,7 +132,7 @@ User runs: swt
 ```
 User runs: swt --support
   → TPM comes online with support mode active
-  → TPM reads support.repos in swt_settings.json to map each app's path
+  → TPM reads support.apps in swt_settings.json to map each app's path
   → User describes a support issue, naming the app
   → TPM treats that app's path as the active work repo
   → TPM dispatches SWEs to divide-and-conquer the investigation
@@ -168,7 +168,7 @@ When booting in constrained mode and the ticket notes already exist from a previ
 
 ## Settings File
 
-A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist) AND accumulated session data (feedback entries, support repo map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
+A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist, statusline display toggle) AND accumulated session data (feedback entries, support app map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The current schema is `_schema: 2` — `deploy.sh` migrates v1 files automatically and writes a `${SWT_SETTINGS_PATH}.v1.bak` backup before rewriting. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
 
 ## Feedback Log
 
@@ -176,7 +176,7 @@ A persistent, project-agnostic log of feature ideas the user accumulates across 
 
 ## Support Mode
 
-A session-modality dedicated to multi-app team support work, triggered by `swt --support`. Stored under the `support` key in `swt_settings.json` (`support.enabled`, `support.apps[]`, `support.search_roots[]`, `support.repos{}`). `deploy.sh` exports `SWT_SUPPORT_ENABLED`, `SWT_SUPPORT_PATH` (backward-compat alias for `SWT_SETTINGS_PATH`), and `SWT_SUPPORT_MODE`. The `support.repos` object maps supported apps (CMMS, HITS, TPS, MCP) to their local repo paths (or `null` when unmapped) — TPM reads it on every boot to know where each app lives. With `--support`, the entire session is scoped to support work and the user can pivot between apps within the session. Mutually exclusive with `--branch`. See the Support Mode section in `tpm-agent.md` for full behavior.
+A session-modality dedicated to multi-app team support work, triggered by `swt --support`. Stored under the `support` key in `swt_settings.json` (`support.enabled`, `support.apps{}`). `deploy.sh` exports `SWT_SUPPORT_ENABLED`, `SWT_SUPPORT_PATH` (backward-compat alias for `SWT_SETTINGS_PATH`), and `SWT_SUPPORT_MODE`. The `support.apps` object maps supported apps (CMMS, HITS, TPS, MCP) to their local repo paths (or `null` when unmapped) — TPM reads it on every boot to know where each app lives. On `swt --support` boots, `deploy.sh` runs boot-time auto-discovery for any `null` entries — it scans curated roots first, then falls back to a depth-limited C-drive search, and writes any matches back to `swt_settings.json` (printing a `[swt] discovered <APP> at <path>` line per find). With `--support`, the entire session is scoped to support work and the user can pivot between apps within the session. Mutually exclusive with `--branch`. See the Support Mode section in `tpm-agent.md` for full behavior.
 
 ## Pre-PR Checklist (CodeRabbit-Aware)
 
@@ -208,6 +208,10 @@ Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP 
 ## Clipboard Image Reading
 
 TPM can read screenshots from the user's Windows clipboard via `scripts/clipboard-read.ps1` (a PowerShell script in Project-SWT). When the user says "look at my clipboard" or "check this screenshot", TPM runs the script to save the clipboard image to a temp file, then reads it with Claude Vision. See the Clipboard Image Reading section in `tpm-agent.md` for the full procedure. Screenshots can also be passed to SWE agents by including the file path in their assignment.
+
+## Statusline Display
+
+The Claude Code statusline shows the SWT version on every line, and (when available) the user's current 5-hour usage window — e.g., `[SWT vX.Y.Z │ 5h 47% · resets 7:32 PM]`. When rate-limit data isn't present in the harness payload (early in a session, API-key auth, or non-Pro/Max plan), it falls back to the version-only form `[SWT vX.Y.Z]`. The toggle lives in `swt_settings.json` under `statusline.enabled`. The script lives at `scripts/swt-statusline.sh` and is wired into the harness via `~/.claude/settings.json` (`statusLine.command`). The script never fails — every error path falls back silently to the short form. See the Statusline Display section in `tpm-agent.md` for full behavior, the state matrix, and how the user enables/disables it conversationally.
 
 ## .NET Guardrails
 
@@ -323,7 +327,8 @@ Project-SWT/
 ├── deploy.sh                              # The swt command — deploys the agent team
 ├── .gitignore                             # Ignores tests/ directory
 ├── scripts/
-│   └── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
+│   ├── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
+│   └── swt-statusline.sh                  # Renders the Claude Code statusline (version + 5h usage)
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml                        # DEPRECATED — first-boot seed only (see swt_settings.json)
@@ -353,7 +358,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 7. **OBSIDIAN NOTES ARE LIVING DOCUMENTS** — TPM updates them as work progresses, not just at the end. Only TPM writes to Obsidian files — SWEs and QA report back to TPM who consolidates.
 8. **NEVER LOG CREDENTIALS** — never write passwords, API keys, tokens, or secrets to any file.
 9. **RESPECT SUBAGENT LIMITS** — never exceed `SWE_AGENT_COUNT` concurrent SWE subagents or `QA_AGENT_COUNT` concurrent QA subagents.
-10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) TPM may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support repos map, plus the rest of user config). (c) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd. In support mode, this redirect exception covers each app path listed in `support.repos` — pivoting to another app's path is a fresh redirect under this same clause.
+10. **STAY IN CWD** — agents work in the user's current working directory by default. Exceptions: (a) agents may read/write Obsidian notes and Project-SWT files as needed. (b) TPM may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support apps map, plus the rest of user config). (c) If the user verbally redirects the session to a different path, agents treat that path as the work repo for the remainder of the session and may read and write there freely. The redirect is first-class — agents work in the redirected path the same way they would in cwd. In support mode, this redirect exception covers each app path listed in `support.apps` — pivoting to another app's path is a fresh redirect under this same clause.
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
 13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt_settings.json` (`database.allowlist`).

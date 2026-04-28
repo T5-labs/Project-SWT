@@ -18,6 +18,7 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
 - **Database access** — Read-only SQL queries via LINQPad for schema exploration and data inspection
+- **Statusline display** — Claude Code statusline shows your SWT version and current 5-hour Claude usage window when enabled
 - **Cross-platform** — Works in both Git Bash and WSL with automatic path translation and a single shared launcher
 - **One-command setup** — `deploy.sh --setup` configures everything (launcher, PATH, platform detection)
 
@@ -165,14 +166,15 @@ Top-level keys and what they contain:
 
 | Key | Description |
 |-----|-------------|
-| `_schema` | Schema version for future migrations (currently 1) |
+| `_schema` | Schema version for future migrations (currently 2) |
 | `team` | Agent core counts and limits (`swe_count`, `swe_performance_cores`, `swe_efficiency_cores`, `qa_count`) |
 | `atlassian` | Jira cloud ID, site URL, board ID and URL |
 | `paths` | Obsidian vault path, Edge browser profile path, LINQPad runner path |
 | `playwright` | Playwright settings (`headless` toggle) |
 | `database` | Database toggle and `allowlist` map of project keys to LINQPad connection names |
 | `feedback` | Feedback log toggle and entries |
-| `support` | Support mode toggle, app list, search roots, and repos |
+| `support` | Support mode `enabled` flag and `apps{}` map of app name → repo path or `null` (auto-discovered on boot) |
+| `statusline` | Statusline display config (`enabled` flag — shows SWT version + 5-hour Claude usage window in Claude Code) |
 
 To edit a value: open `swt_settings.json` directly in any text editor, or ask TPM *"update my Obsidian path to X"* and TPM will make the edit for you.
 
@@ -252,7 +254,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                        │
-│   Project SWT v0.27.0 (Git Bash)                      github.com/T5-labs/Project-SWT   │
+│   Project SWT vX.Y.Z (Git Bash)                      github.com/T5-labs/Project-SWT   │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
@@ -270,7 +272,7 @@ The deploy script prints a compact info panel, then TPM prints structured status
 │                                                                                        │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 
-[swt] ✓ Version: 0.27.0
+[swt] ✓ Version: X.Y.Z
 [swt] ✓ Config loaded (swt_settings.json)
 [swt] ✓ Team: 2 performance + 1 efficiency + 1 QA
 [swt] ✓ Branch: bugfix/CMMS-2576-mrir-notification
@@ -350,7 +352,8 @@ Project-SWT/
 ├── deploy.sh                     # The swt command
 ├── .gitignore                    # Ignores tests/
 ├── scripts/
-│   └── clipboard-read.ps1       # Saves Windows clipboard image to temp file
+│   ├── clipboard-read.ps1       # Saves Windows clipboard image to temp file
+│   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + 5-hour Claude usage)
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml               # Deprecated seed template — used only on first boot
@@ -399,4 +402,4 @@ Project-SWT/
 | **Review (auto)** | `swt --branch` on colleague's branch | Constrained mode + commits by others → 3 SWEs review the diff (security/logic/quality lenses). |
 | **Review (manual)** | mid-session, user says "review the changes" or similar | Constrained or unconstrained — user verbally triggers Review Mode to analyze a branch diff. |
 | **Preview (manual)** | mid-session, user or TPM invokes | Dry-run code planning for a specific change. |
-| **Support** | `swt --support` | Dedicated multi-app support work. Reads `support.repos` from settings, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate across configured app repos. |
+| **Support** | `swt --support` | Dedicated multi-app support work. Reads `support.apps` from settings, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate across configured app repos. |
