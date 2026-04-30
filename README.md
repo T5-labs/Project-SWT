@@ -19,6 +19,7 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
 - **Database access** — Read-only SQL queries via LINQPad for schema exploration and data inspection
 - **Statusline display** — Claude Code statusline shows your SWT version and current 5-hour Claude usage window when enabled
+- **Bitbucket integration** — Optional opt-in REST access for PR / pipeline / comment queries via secure local secrets file. See [`docs/bitbucket-integration.md`](docs/bitbucket-integration.md) for the architecture and decisions reference.
 - **Cross-platform** — Works in both Git Bash and WSL with automatic path translation and a single shared launcher
 - **One-command setup** — `deploy.sh --setup` configures everything (launcher, PATH, platform detection)
 
@@ -154,6 +155,15 @@ swt --remote                     # Unconstrained + remote control
 swt --support                    # Support mode — multi-app investigation session
 ```
 
+### Global Flags
+
+`--engine=<binary>` selects which Claude Code-compatible binary `swt` exec's. Defaults to `claude`. Combines with any mode (not a mode itself) — accepts a name on PATH or an absolute path.
+
+```bash
+swt --engine=claude-rc           # Use a release-candidate engine
+swt --branch --engine=/path/to/custom-build
+```
+
 ## Configuration
 
 Configuration is stored in `swt_settings.json` in your Windows home directory (`C:\Users\<you>\swt_settings.json`). This is the single source of truth for all user-tunable values — created automatically on first boot by seeding from `.claude/config/swt.yml`.
@@ -166,7 +176,7 @@ Top-level keys and what they contain:
 
 | Key | Description |
 |-----|-------------|
-| `_schema` | Schema version for future migrations (currently 2) |
+| `_schema` | Schema version for future migrations (currently 3) |
 | `team` | Agent core counts and limits (`swe_count`, `swe_performance_cores`, `swe_efficiency_cores`, `qa_count`) |
 | `atlassian` | Jira cloud ID, site URL, board ID and URL |
 | `paths` | Obsidian vault path, Edge browser profile path, LINQPad runner path |
@@ -175,6 +185,7 @@ Top-level keys and what they contain:
 | `feedback` | Feedback log toggle and entries |
 | `support` | Support mode `enabled` flag and `apps{}` map of app name → repo path or `null` (auto-discovered on boot) |
 | `statusline` | Statusline display config (`enabled` flag — shows SWT version + 5-hour Claude usage window in Claude Code) |
+| `bitbucket` | Bitbucket Cloud integration toggle and flavor (`enabled`, `flavor`). Off by default. Workspace/email/token live in the user's secrets file (`${SWT_SECRETS_PATH}`). |
 
 To edit a value: open `swt_settings.json` directly in any text editor, or ask TPM *"update my Obsidian path to X"* and TPM will make the edit for you.
 
@@ -352,6 +363,7 @@ Project-SWT/
 ├── deploy.sh                     # The swt command
 ├── .gitignore                    # Ignores tests/
 ├── scripts/
+│   ├── bb-curl.sh               # Bitbucket REST wrapper (sources secrets locally, never exposes token)
 │   ├── clipboard-read.ps1       # Saves Windows clipboard image to temp file
 │   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + 5-hour Claude usage)
 ├── .claude/

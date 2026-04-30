@@ -168,7 +168,7 @@ When booting in constrained mode and the ticket notes already exist from a previ
 
 ## Settings File
 
-A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist, statusline display toggle) AND accumulated session data (feedback entries, support app map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The current schema is `_schema: 2` — `deploy.sh` migrates v1 files automatically and writes a `${SWT_SETTINGS_PATH}.v1.bak` backup before rewriting. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
+A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist, statusline display toggle, Bitbucket integration `enabled` and `flavor` — `workspace`, `email`, and `token` live in the secrets file at `${SWT_SECRETS_PATH}`) AND accumulated session data (feedback entries, support app map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The current schema is `_schema: 3` — `deploy.sh` migrates older versions automatically and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
 
 ## Feedback Log
 
@@ -208,6 +208,10 @@ Agents access the local SQL Server via LINQPad's CLI runner (`lprun8`), not MCP 
 ## Clipboard Image Reading
 
 TPM can read screenshots from the user's Windows clipboard via `scripts/clipboard-read.ps1` (a PowerShell script in Project-SWT). When the user says "look at my clipboard" or "check this screenshot", TPM runs the script to save the clipboard image to a temp file, then reads it with Claude Vision. See the Clipboard Image Reading section in `tpm-agent.md` for the full procedure. Screenshots can also be passed to SWE agents by including the file path in their assignment.
+
+## Bitbucket Integration
+
+Optional, opt-in Bitbucket Cloud REST integration for querying and posting to PR state, comments, and pipelines. Off by default — only active when the user has run `deploy.sh --setup-bitbucket`. User-specific account data — `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, and `BITBUCKET_WORKSPACE` — lives in `${SWT_SECRETS_PATH}` (chmod 600), never in the repo and never in `swt_settings.json`. The settings file holds only project-level config for the bitbucket block (`enabled`, `flavor`, `auth.token_source`); workspace moved to the secrets file because it's paired with the credentials, not project config. `deploy.sh` exports `SWT_BB_ENABLED` and `SWT_BB_FLAVOR` to TPM, but `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE` are NOT exported — only `scripts/bb-curl.sh` reads them via local sourcing of the secrets file at call time. Agents make read and write calls via `bb-curl` at user direction. Agents NEVER craft raw `Authorization` headers; the "NEVER read or echo secrets" hard rule covers this. See the Bitbucket Integration section in `tpm-agent.md` for the full schema, behavior matrix, and example invocations. User-facing reference: `docs/bitbucket-integration.md`.
 
 ## Statusline Display
 
@@ -327,6 +331,7 @@ Project-SWT/
 ├── deploy.sh                              # The swt command — deploys the agent team
 ├── .gitignore                             # Ignores tests/ directory
 ├── scripts/
+│   ├── bb-curl.sh                         # Bitbucket REST wrapper (sources secrets locally, never exposes token)
 │   ├── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
 │   └── swt-statusline.sh                  # Renders the Claude Code statusline (version + 5h usage)
 ├── .claude/
@@ -362,6 +367,7 @@ These are non-negotiable and must be enforced in all agent definitions:
 11. **PROTECT .NET CONFIG FILES** — agents NEVER modify connection strings or secrets in `appsettings.json`/`appsettings.*.json`, or environment-specific values in `launchSettings.json`. Agents must flag `.csproj`, `.sln` changes, and NuGet package additions to the user before proceeding.
 12. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. If a build, test run, or migration is needed, agents report it to the user.
 13. **READ-ONLY DATABASE ACCESS** — agents can ONLY execute SELECT queries via LINQPad (`lprun8`). INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, and EXEC statements are absolutely forbidden. Agents can only use database connections from the allowlist in `swt_settings.json` (`database.allowlist`).
+14. **NEVER read or echo secrets.** Do not read the SWT secrets file directly (its location is exported as `${SWT_SECRETS_PATH}` by `deploy.sh`). Do not echo, log, or include in any output the values of environment variables matching `*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`. For Bitbucket operations, use `scripts/bb-curl.sh` — never construct raw `Authorization` headers in any command.
 
 ---
 

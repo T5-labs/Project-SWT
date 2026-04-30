@@ -319,3 +319,195 @@ Tell the user:
 - **Do not create directories.** If the Obsidian vault path doesn't exist, tell the user — do not create it.
 - **Only touch `.claude/config/swt.yml` and (post-first-boot) `swt_settings.json`.** Do not modify any other file in the repo or on the filesystem.
 - **Stay in scope.** If the user asks you to do something beyond this playbook (e.g., "also set up shell aliases", "configure my terminal"), tell them that's out of scope for setup.
+
+---
+
+## 6 — Bitbucket Integration (Optional)
+
+> For the full architecture and decisions reference, see [`docs/bitbucket-integration.md`](docs/bitbucket-integration.md).
+
+This section walks the user through enabling the optional Bitbucket Cloud REST integration. SWT works perfectly fine without it — skip this entire section if the user does not use Bitbucket Cloud or does not want SWT to query PRs, comments, or pipelines.
+
+The Bitbucket secrets file (`.swt_secrets`) lives in the same directory as `swt_settings.json` — the user's Windows home directory (`/mnt/c/Users/<you>/` on WSL, `/c/Users/<you>/` on Git Bash). Keeping both files in one place makes them easier to find, easier to back up, and consistent with the rest of SWT's config layout. `deploy.sh` exports `SWT_SECRETS_PATH` on every boot, so once setup is complete the env var is available in every `swt` session.
+
+### Step 1 — Decide if you want it
+
+Ask the user: *"Do you want SWT agents to be able to query Bitbucket Cloud (PR state, comments, pipelines)?"* If they say no, stop here and move on. The integration is fully opt-in — `bitbucket.enabled` defaults to `false` and nothing in SWT depends on it.
+
+### Step 2 — Generate an Atlassian Cloud API token
+
+Bitbucket Cloud now authenticates via Atlassian API tokens with HTTP Basic auth (email + token). The legacy Bitbucket-only app passwords are deprecated — do NOT use them.
+
+Tell the user:
+
+> Open your Atlassian API tokens page: **https://id.atlassian.com/manage-profile/security/api-tokens**
+>
+> Create a new API token with these scopes (Bitbucket account, pull request, and pipeline read scopes):
+> - `read:bitbucket-account`
+> - `read:bitbucket-pull-request`
+> - `read:bitbucket-pipeline`
+> - `write:bitbucket-pull-request` *(optional — only needed if you want agents to post or reply to PR comments)*
+>
+> If the scope slugs differ in Atlassian's UI, refer to Atlassian's API token docs and select the equivalent Bitbucket account / pull request / pipeline read scopes.
+>
+> Copy the generated token immediately — Atlassian only shows it once. You will also need your Atlassian login email (the email you sign in to Atlassian with) — both pieces are required for HTTP Basic auth.
+
+Do NOT ask the user to paste the token to you. The token never enters your context. The user pastes it (and their email) into a local file in a later step.
+
+### Step 3 — Run interactive setup
+
+Have the user run:
+
+```bash
+bash deploy.sh --setup-bitbucket
+```
+
+The script will prompt for:
+- **Workspace slug** — the Bitbucket workspace (e.g., `herzog`).
+- **Flavor** — defaults to `cloud`. Press Enter to accept.
+
+What it does — **the script handles all file creation and permissions for you**:
+- Updates `swt_settings.json` (at `/mnt/c/Users/<you>/swt_settings.json` on WSL, or `/c/Users/<you>/swt_settings.json` on Git Bash) — flips `bitbucket.enabled` to `true` and writes `flavor`. Workspace, email, and token are user-specific account data and live in `.swt_secrets` (never in the settings file); the settings file holds only project-level config.
+- Creates `.swt_secrets` in the user's Windows home directory (resolves to `/mnt/c/Users/<you>/.swt_secrets` on WSL, `/c/Users/<you>/.swt_secrets` on Git Bash — the same directory as `swt_settings.json`) with `chmod 600` already applied, pre-populated with this template:
+
+  ```
+  # SWT secrets — never commit this file.
+  # === Bitbucket Cloud ===
+  # Atlassian API token + email + workspace for Bitbucket Cloud (HTTP Basic auth).
+  # Generate token at: https://id.atlassian.com/manage-profile/security/api-tokens
+  # Required (read) scopes: read:bitbucket-account, read:bitbucket-pull-request, read:bitbucket-pipeline.
+  # Optional (write) scope for posting/replying to PR comments: write:bitbucket-pull-request.
+  BITBUCKET_EMAIL=
+  BITBUCKET_TOKEN=
+  BITBUCKET_WORKSPACE=your-workspace-slug
+  ```
+
+  `BITBUCKET_WORKSPACE` is pre-populated by the script with the workspace slug you typed at the prompt — you do NOT need to fill it in manually.
+
+**Your only manual step** — once the script finishes — is filling in `BITBUCKET_EMAIL` and `BITBUCKET_TOKEN`, each after the `=`. The workspace line is already populated. No `touch`, no `chmod 600`; the script already did them. See Step 4 below.
+
+**TPM-driven alternative:** if you'd rather not run the script, you can ask TPM to do this in an `swt` session. TPM creates the same `.swt_secrets` template at `${SWT_SECRETS_PATH}` with the same chmod-600 permissions and updates `swt_settings.json` for you. TPM will ask for your workspace slug and pre-populate the `BITBUCKET_WORKSPACE` line for you. Either way, your only manual step is filling in `BITBUCKET_EMAIL` and `BITBUCKET_TOKEN`.
+
+**Note:** the interactive script must be run from an interactive terminal. The workspace and flavor prompts read from `/dev/tty` and cannot be piped in from another command or driven by an agent. If the interactive prompts will not work in your environment, ask TPM to do it in-session, or use the manual fallback in the subsection below.
+
+### Step 4 — Paste your email and token into `.swt_secrets`
+
+Step 3 already created the file with the right permissions, the workspace line pre-populated, and template placeholders for the rest. **Your only manual step is filling in `BITBUCKET_EMAIL` and `BITBUCKET_TOKEN`.** Bitbucket Cloud uses HTTP Basic auth — neither value alone is sufficient; both are required. The workspace line is already populated by the script. The file lives at `${SWT_SECRETS_PATH}` — which resolves to `/mnt/c/Users/<you>/.swt_secrets` on WSL or `/c/Users/<you>/.swt_secrets` on Git Bash. Open it in the editor of your choice — using the env var is the most portable form:
+
+```bash
+nano "$SWT_SECRETS_PATH"
+# or: code "$SWT_SECRETS_PATH"
+# or: vim "$SWT_SECRETS_PATH"
+```
+
+If `SWT_SECRETS_PATH` isn't yet exported in your current shell (e.g., you haven't run `swt` yet since setup), use the concrete path:
+
+```bash
+nano /mnt/c/Users/<you>/.swt_secrets   # WSL
+nano /c/Users/<you>/.swt_secrets       # Git Bash
+```
+
+Fill in `BITBUCKET_EMAIL` and `BITBUCKET_TOKEN` so the file reads:
+
+```
+# === Bitbucket Cloud ===
+BITBUCKET_EMAIL=your-atlassian-login-email@example.com
+BITBUCKET_TOKEN=your-api-token
+BITBUCKET_WORKSPACE=your-workspace-slug
+```
+
+The `BITBUCKET_WORKSPACE` line is already populated by the script — leave it as-is unless you typed the wrong slug at the prompt. Use your real Atlassian login email (the address you sign in to Atlassian with — not just a username). No quotes, no spaces around the `=`, no `export` keyword. Save and close.
+
+You (the agent) MUST NOT read `.swt_secrets` to verify it. The hard rule against reading secrets applies to you too. Confirm with the user verbally: *"Did you save the file with `BITBUCKET_EMAIL=<your-atlassian-email>` and `BITBUCKET_TOKEN=<your-token>` filled in, and is the pre-populated `BITBUCKET_WORKSPACE` line correct?"*
+
+### Step 5 — Verify
+
+Tell the user to open a fresh terminal (or re-source their shell rc so the secrets file is sourced into scope), then run `bb-curl` against `/user`. The script lives at `${SWT_DIR}/scripts/bb-curl.sh` and is not on `$PATH` by default, so the canonical form is the absolute path:
+
+```bash
+${SWT_DIR}/scripts/bb-curl.sh GET /user
+```
+
+For convenience, the user can alias it in their shell rc:
+
+```bash
+alias bb-curl='${SWT_DIR}/scripts/bb-curl.sh'
+```
+
+After which `bb-curl GET /user` works directly.
+
+A successful response is a JSON object with their Bitbucket account info (`username`, `display_name`, `account_id`, etc.). If they see that, Bitbucket integration is working. The workspace slug used by `bb-curl` is sourced from the secrets file (`BITBUCKET_WORKSPACE`), paired with the email and token.
+
+If the `/user` endpoint returns a permission/scope error (some token configurations restrict it), use this fallback to confirm the credentials and workspace are working together:
+
+```bash
+${SWT_DIR}/scripts/bb-curl.sh GET "/repositories/<your-workspace>?pagelen=3"
+```
+
+This hits a workspace-scoped endpoint that exercises the same email + token + workspace combo. A 200 with a paginated list of repositories means the integration is working.
+
+If the verification fails with a **401**, double-check that you used your **Atlassian login email** (not just a username) and that the token has the required read scopes (`read:bitbucket-account`, `read:bitbucket-pull-request`, `read:bitbucket-pipeline`), plus `write:bitbucket-pull-request` if you want agents to post or reply to PR comments. Bitbucket Cloud uses HTTP Basic auth — both the email and the token must be correct.
+
+### Manual Setup (if interactive prompts don't work)
+
+For users who cannot drive `--setup-bitbucket` interactively (e.g., running from a tooling pipeline, a constrained shell, or any environment where `/dev/tty` is not attached), use these steps instead of Step 3. **You can also ask TPM to do this for you in an `swt` session** — TPM will create the same template file with chmod 600 and update `swt_settings.json`, so your only manual step remains pasting the token.
+
+1. **Edit `swt_settings.json` directly.** The file lives at the user's Windows home — `/mnt/c/Users/<you>/swt_settings.json` on WSL, or `/c/Users/<you>/swt_settings.json` on Git Bash. Find the `bitbucket` block and set:
+
+   ```json
+   "bitbucket": {
+     "enabled": true,
+     "flavor": "cloud",
+     "auth": {
+       "token_source": "env:BITBUCKET_TOKEN"
+     }
+   }
+   ```
+
+   Note: workspace is no longer stored in `swt_settings.json` — it lives in `.swt_secrets` alongside the email and token (it's user-specific account data, not project config).
+
+2. **Create the secrets file** (only needed if you're going fully manual — TPM and `--setup-bitbucket` both handle this for you). The file lives in your Windows home directory, alongside `swt_settings.json`:
+
+   ```bash
+   # WSL
+   touch /mnt/c/Users/<you>/.swt_secrets && chmod 600 /mnt/c/Users/<you>/.swt_secrets
+
+   # Git Bash
+   touch /c/Users/<you>/.swt_secrets && chmod 600 /c/Users/<you>/.swt_secrets
+   ```
+
+   Once `swt` has been run at least once, `deploy.sh` exports `SWT_SECRETS_PATH` on every boot, so subsequent edits can use the portable form: `nano "$SWT_SECRETS_PATH"`.
+
+   Then open it in your editor and paste all three lines (Bitbucket Cloud uses HTTP Basic auth — email and token are both required, and workspace is paired with them as user-specific account data):
+
+   ```
+   # SWT secrets — never commit this file.
+   # === Bitbucket Cloud ===
+   # Atlassian API token + email + workspace for Bitbucket Cloud (HTTP Basic auth).
+   # Generate token at: https://id.atlassian.com/manage-profile/security/api-tokens
+   # Required (read) scopes: read:bitbucket-account, read:bitbucket-pull-request, read:bitbucket-pipeline.
+   # Optional (write) scope for posting/replying to PR comments: write:bitbucket-pull-request.
+   BITBUCKET_EMAIL=your-atlassian-login-email@example.com
+   BITBUCKET_TOKEN=your-token-here
+   BITBUCKET_WORKSPACE=your-workspace-slug
+   ```
+
+3. **Verify** with `${SWT_DIR}/scripts/bb-curl.sh GET /user` exactly as in Step 5 above.
+
+**Backward compat note:** earlier SWT versions placed `.swt_secrets` in your WSL home (`~/.swt_secrets`). If you have a vestige there, you can `rm` it after confirming the new location works — `bb-curl.sh` now reads exclusively from `${SWT_SECRETS_PATH}` in your Windows home.
+
+### Step 6 — Troubleshooting
+
+- **`BITBUCKET_TOKEN not set`** — the secrets file may be missing or malformed. Tell the user to verify the file exists at `${SWT_SECRETS_PATH}` (their Windows home — `/mnt/c/Users/<you>/.swt_secrets` on WSL, `/c/Users/<you>/.swt_secrets` on Git Bash) and has the right format. **Do NOT** suggest `cat "$SWT_SECRETS_PATH"` casually — that command prints the token to the terminal and risks landing it in shell history or scrollback. If the user really needs to inspect it, tell them to use a private terminal session and clear scrollback after.
+- **`BITBUCKET_EMAIL not set`** — the secrets file is missing the email line. Bitbucket Cloud requires HTTP Basic auth (email + token); the token alone is not sufficient. Tell the user to add `BITBUCKET_EMAIL=your-atlassian-login-email@example.com` to the secrets file alongside their token, using the email they sign in to Atlassian with.
+- **`BITBUCKET_WORKSPACE not set`** — the secrets file is missing the workspace line. Workspace now lives in `.swt_secrets` alongside the email and token (it's user-specific account data, not project config). Tell the user to add `BITBUCKET_WORKSPACE=your-workspace-slug` to the secrets file. If they used `deploy.sh --setup-bitbucket`, the line should have been pre-populated automatically — they may have edited it out by accident.
+- **Setup script hangs at the workspace prompt** — `--setup-bitbucket` reads from `/dev/tty` and cannot be piped or driven by an agent. Run it from a real interactive terminal, or use the Manual Setup subsection above.
+- **HTTP 401 / 403** — the token is expired, revoked, or lacks the required scopes; OR the paired email is wrong; OR the workspace slug doesn't match the credentials. Bitbucket Cloud uses HTTP Basic auth, so all three secrets file values (`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE`) must be correct. Have the user verify their Atlassian login email is exactly right, confirm the workspace slug in `.swt_secrets` matches the workspace they actually have access to, then regenerate the token at https://id.atlassian.com/manage-profile/security/api-tokens (with read scopes `read:bitbucket-account`, `read:bitbucket-pull-request`, `read:bitbucket-pipeline`, plus `write:bitbucket-pull-request` if they want agents to post or reply to PR comments) and update the secrets file at `${SWT_SECRETS_PATH}` with the new value.
+- **HTTP 404 on a known-good repo path** — double-check the workspace slug; a wrong workspace yields 404 rather than 401.
+
+### Step 7 — Security notes
+
+- The token never leaves the user's machine. `scripts/bb-curl.sh` sources the secrets file at `${SWT_SECRETS_PATH}` locally on each call.
+- The token is never written to `swt_settings.json`, the repo, any logged file, or any agent transcript.
+- The Atlassian email is paired with the token to form HTTP Basic auth credentials — neither alone is enough. `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, and `BITBUCKET_WORKSPACE` all live in the same chmod-600 secrets file. Email is part of the credential pair; workspace lives there too because it's user-specific account data tied to the credentials, not project config.
+- Agents (TPM, SWE, QA) have a hard rule against reading the secrets file directly and against echoing any `*_TOKEN`, `*_SECRET`, `*_KEY`, or `*_PASSWORD` environment variable.

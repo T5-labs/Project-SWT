@@ -1,8 +1,24 @@
-# Normalize line endings — repo is authored on Windows but standardized to LF.
+# Enforce LF line endings for text files in this repo.
+# Existing files are not auto-normalized; run `git add --renormalize .`
+# manually if you want to convert pre-existing CRLF files in one commit.
 * text=auto eol=lf
-*.md text eol=lf
-*.sh text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
-*.json text eol=lf
-*.ps1 text eol=crlf
+
+# Explicitly mark shell scripts and config as text/LF.
+*.sh         text eol=lf
+*.md         text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.json       text eol=lf
+*.ts         text eol=lf
+*.js         text eol=lf
+
+# Windows-native scripts (keep CRLF — PowerShell expects it).
+*.ps1        text eol=crlf
+
+# Binary files (don't ever convert).
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary

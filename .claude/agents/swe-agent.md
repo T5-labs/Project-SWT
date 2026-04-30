@@ -216,30 +216,28 @@ You have read-only database access via LINQPad's CLI runner (`lprun8`). TPM prov
 
 **Command format:**
 
-`lprun8` does NOT accept inline query strings — it only accepts a path to a script file. You must write your SQL to a temp file first, then pass the file path.
+`lprun8` does NOT accept inline query strings — it only accepts a path to a script file. **Always use the wrapper at `${SWT_DIR}/scripts/lprun-query.sh`** — it owns the temp file lifecycle, writes scratch SQL to the user's Windows temp directory (OUTSIDE the work repo), translates the path for the Windows binary, and removes the scratch file on exit (including errors and Ctrl+C). You never write `.sql` files yourself and you never invoke `lprun8` directly.
 
-TPM provides the LINQPad path in your assignment (pre-resolved for your platform). Use it in your commands — never hardcode the path.
-
-For simple one-liner queries:
+For simple one-liner queries (inline SQL via positional arg):
 ```bash
-echo "SELECT TOP 10 * FROM TableName" > /tmp/query.sql && "{lprun_path}" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
+"${SWT_DIR}/scripts/lprun-query.sh" -c "{connection}" "SELECT TOP 10 * FROM TableName"
 ```
 
-For multi-line queries, use a heredoc:
+For multi-line queries, pipe a heredoc into the wrapper:
 ```bash
-cat <<'EOF' > /tmp/query.sql
+cat <<'EOF' | "${SWT_DIR}/scripts/lprun-query.sh" -c "{connection}"
 SELECT TOP 10
     t.Id,
     t.Name
 FROM TableName t
 WHERE t.IsActive = 1
 EOF
-"{lprun_path}" -cxname="{connection}" -lang=SQL -format=csv /tmp/query.sql
 ```
 
-- `-lang=SQL` forces raw SQL mode (not C# LINQ)
-- `-format=csv` gives structured, parseable output
-- The last argument is always a file path — never an inline query string
+- The wrapper sets `-lang=SQL` and `-format=csv` for you — raw SQL mode with structured, parseable output.
+- The connection name is always passed via `-c` and quoted (names contain commas/spaces, e.g. `"localhost, 1433.cmms"`).
+- **NEVER create `.sql` files inside the work repo.** Use `scripts/lprun-query.sh` exclusively for database queries — it owns the temp file lifecycle and cleans up after itself. If you need to investigate query results step-by-step, run multiple invocations of the wrapper rather than persisting query files.
+- Do NOT redirect SQL into a temp path yourself, and do NOT call `lprun8` directly with `-cxname=...` — both patterns are obsolete. The wrapper is the only supported path.
 
 **When to use:**
 - Understanding table schema, columns, and relationships before writing data access code
@@ -256,7 +254,8 @@ EOF
 
 **Env vars available to you (set by deploy.sh):**
 - `SWT_DB_CONNECTION` — the resolved connection name for this project's database (sourced from `database.allowlist` in `swt_settings.json`). Passed via TPM's assignment prompt when DB access is granted.
-- `SWT_LPRUN_PATH` — absolute path to the LINQPad CLI runner, pre-resolved for your platform.
+- `SWT_LPRUN_PATH` — absolute path to the LINQPad CLI runner, pre-resolved for your platform. Read internally by `scripts/lprun-query.sh`; you do not invoke it directly.
+- `SWT_DIR` — absolute path to the Project-SWT install directory. Use this to invoke the wrapper: `${SWT_DIR}/scripts/lprun-query.sh`.
 - `SWT_SETTINGS_PATH` — full path to `swt_settings.json`. SWEs typically do not need this directly — it is TPM's tool. Available if you ever need to confirm config state.
 
 ## Web Capabilities
@@ -283,3 +282,4 @@ Use web tools when you genuinely need external information. Don't over-browse �
 9. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read Obsidian notes and Project-SWT files when paths are provided by TPM. (b) TPM may provide a different work directory in your assignment when the user has verbally redirected the session — treat that path as your work repo and edit files in it normally.
 10. **NO SPAWNING SUBAGENTS** — you do NOT use the Agent tool to spawn other agents. Only TPM coordinates subagents. If you need help, report back to TPM.
 11. **DATABASE ACCESS IS READ-ONLY** — when using LINQPad for database queries, you may ONLY run SELECT statements. Never run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, or any statement that modifies data or schema. Only use the connection name TPM provides — never construct your own. Connections are allowlisted in `swt_settings.json` (the `database.allowlist` map); TPM resolves them for you.
+12. **NEVER read or echo secrets.** Do not read the SWT secrets file directly (its location is exported as `${SWT_SECRETS_PATH}` by `deploy.sh`). Do not echo, log, or include in any output the values of environment variables matching `*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`. For Bitbucket operations, use `scripts/bb-curl.sh` — never construct raw `Authorization` headers in any command.

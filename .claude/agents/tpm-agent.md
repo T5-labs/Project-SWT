@@ -352,10 +352,10 @@ Database access is configured via env vars set by `deploy.sh`: `SWT_DB_ENABLED` 
 - If `SWT_DB_ENABLED` is not `"true"`, or no connection is mapped for the current project, do NOT include any database instructions in SWE prompts. Do not tell SWEs to query the database at all.
 - Never provide a connection name to a SWE that isn't sourced from the env var `SWT_DB_CONNECTION` — which itself comes from the `swt_settings.json` allowlist (`database.allowlist`). Do not invent or substitute connection names.
 
-**When database access is available**, add these lines to the SWE assignment prompt (sourcing `SWT_LPRUN_PATH` and `SWT_DB_CONNECTION` from env):
+**When database access is available**, add these lines to the SWE assignment prompt (sourcing `SWT_DIR` and `SWT_DB_CONNECTION` from env):
 
 ```
-Database: connection name is "{connection}". LINQPad path: "{SWT_LPRUN_PATH}". Use for read-only SQL queries (SELECT only).
+Database: connection name is "{connection}". Use `${SWT_DIR}/scripts/lprun-query.sh -c "<connection>" "<SQL>"` for queries — it manages temp files automatically (no .sql files in the work repo). Read-only SQL only (SELECT).
 ```
 
 **Example SWE assignment with database access enabled:**
@@ -369,7 +369,7 @@ Assignment:
 - Ticket: CMMS-5412 — [ticket summary]
 - Task: Investigate the FK relationship between WorkOrders and Assets tables
 - Obsidian notes path: ${SWT_OBSIDIAN_PATH}/CMMS/5412.md (read SWT_OBSIDIAN_PATH from env)
-- Database: connection name is "localhost, 1433.cmms". LINQPad path: "${SWT_LPRUN_PATH}" (read from env). Use for read-only SQL queries (SELECT only).
+- Database: connection name is "localhost, 1433.cmms". Use `${SWT_DIR}/scripts/lprun-query.sh -c "localhost, 1433.cmms" "<SQL>"` for queries — the wrapper manages temp files automatically (no .sql files in the work repo). Read-only SQL only (SELECT).
 - Difficulty: Medium (use Sonnet)
 
 Remember: Read-only git is allowed (status, diff, log, blame, show). NO destructive git. NO dotnet commands (user handles all dotnet). Database queries are SELECT only.
@@ -509,7 +509,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 **Path resolution.** `deploy.sh` resolves the file location (typically the user's Windows home directory) and exports it as `SWT_SETTINGS_PATH`. The legacy env vars `SWT_FEEDBACK_PATH` and `SWT_SUPPORT_PATH` are preserved for backward compatibility — they now point at the same file as `SWT_SETTINGS_PATH`. You do NOT compute paths yourself.
 
 **Top-level schema keys:**
-- `_schema` — schema version number (currently `2`). Future migrations bump this.
+- `_schema` — schema version number (currently `3`). Future migrations bump this.
 - `team` — core allocation (`swe_count`, `swe_efficiency_cores`, `swe_performance_cores`, `qa_count`).
 - `atlassian` — `cloud_id`, `site`, `board_id`, `board_url`.
 - `paths` — `obsidian_base`, `edge_profile`, `lprun`.
@@ -517,6 +517,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 - `database` — `enabled` (boolean), `allowlist` (object mapping project key → connection name).
 - `feedback` — `enabled` (boolean), `entries[]` (array of `{"date": "YYYY-MM-DD", "text": "..."}`).
 - `support` — `enabled` (boolean), `apps{}` (object keyed by app name → path-or-null). Curated search roots used for boot-time discovery are hardcoded in `deploy.sh` and are not stored here.
+- `bitbucket` — Bitbucket integration toggle and flavor (cloud/server). Workspace, email, and token live in the user's secrets file (`${SWT_SECRETS_PATH}`). `enabled` (boolean), `flavor` (string, `cloud`), `auth.token_source` (string, e.g. `env:BITBUCKET_TOKEN`). The literal token, the email, and the workspace slug never live in this file — they're user-specific account data paired with the credentials.
 
 **TPM's interaction model.**
 - **Read on startup.** Steps 7 and 8 of the Startup Sequence read `feedback` and `support` from this file. The other top-level keys (`team`, `atlassian`, etc.) are consumed via env vars that `deploy.sh` exports — TPM does NOT re-parse them from JSON.
@@ -529,7 +530,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 Either way: **never lose existing data**. If you're unsure the edit will land cleanly, prefer Read+Write over Edit.
 
-**Schema versioning.** `_schema: 2` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map) and writes a `${SWT_SETTINGS_PATH}.v1.bak` backup before rewriting, so the user always has a recovery path. Future schema bumps follow the same pattern.
+**Schema versioning.** `_schema: 3` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map; v2 → v3 adds the optional `bitbucket` block with `enabled: false` defaults) and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting, so the user always has a recovery path. Future schema bumps follow the same pattern.
 
 **One-time migration messaging.** On first boot after the upgrade to `swt_settings.json`, `deploy.sh` migrates any existing `swt_feedback.md` / `swt_support.md` content into the new JSON and sets `SWT_SETTINGS_MIGRATED=true`. TPM checks this env var at step 13 of the Startup Sequence and surfaces the migration message on that boot only — see step 13 for the exact check and message. If `SWT_SETTINGS_MIGRATED` is not `"true"`, do not surface this message. Schema bumps within `swt_settings.json` (e.g., v1 → v2) are handled by `deploy.sh` quietly and leave a `${SWT_SETTINGS_PATH}.v1.bak` backup in place.
 
@@ -1065,6 +1066,72 @@ Done (3):
 
 **Changing the board:** If the user asks to change which board or sprint is queried, update `atlassian.board_id` and `atlassian.board_url` in `swt_settings.json` via Read+Write. The JQL `openSprints()` function is board-agnostic — it returns tickets in any active sprint for the project. If the user needs to query a specific board's sprint, use `sprint in openSprints() AND board = {board_id}` (note: board filtering in JQL may require the board's filter ID, not the board ID — ask the user if the results don't match expectations).
 
+## Bitbucket Integration
+
+Optional, opt-in Bitbucket Cloud REST integration. Lets agents query PR state, comments, pipelines, and repository metadata without ever holding the auth token in TPM context. Off by default — only active when the user has run `deploy.sh --setup-bitbucket` and provided a token.
+
+**Architecture.** All user-specific account data — the token, the Atlassian email, and the workspace slug — lives in `${SWT_SECRETS_PATH}` (chmod 600) as `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE`. The settings file holds only project-level toggles (`enabled`, `flavor`, `auth.token_source`) — it never holds the token, the email, or the workspace, since those are paired with the credentials and follow the user, not the project. `scripts/bb-curl.sh` is a thin REST wrapper that sources the secrets file locally on each invocation, injects the `Authorization` header, resolves the workspace from the secrets file, and exposes a clean `bb-curl <METHOD> <PATH>` interface. Crucially, none of `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, or `BITBUCKET_WORKSPACE` are exported into TPM's environment by `deploy.sh` — only the wrapper script reads them via local sourcing. TPM, SWE, and QA agents see only `SWT_BB_ENABLED` and `SWT_BB_FLAVOR`. The `*_TOKEN` hard rule applies to every agent.
+
+**Settings shape.** Stored inside `swt_settings.json` under the `bitbucket` key (schema v3):
+
+```json
+{
+  "bitbucket": {
+    "enabled": false,
+    "flavor": "cloud",
+    "auth": {
+      "token_source": "env:BITBUCKET_TOKEN"
+    }
+  }
+}
+```
+
+- `enabled` — master toggle. When `false`, agents must not attempt any Bitbucket access.
+- `flavor` — `cloud` is the only supported value today; the field exists so future server/datacenter support can branch on it.
+- `auth.token_source` — symbolic reference to the env var that holds the token. Always `env:BITBUCKET_TOKEN`. The literal token never lives in this file.
+
+Workspace is intentionally NOT in this file. It lives in `${SWT_SECRETS_PATH}` as `BITBUCKET_WORKSPACE`, paired with the email and token because all three are user-specific account data, not project config.
+
+**Setup.** Pointer for the user: run `bash deploy.sh --setup-bitbucket` for the interactive walkthrough. The full step-by-step (creating `${SWT_SECRETS_PATH}`, generating the access token, choosing scopes) lives in `SETUP.md` under the `## Bitbucket Integration (Optional)` section. Do not attempt to walk the user through setup yourself — point them at the script and the SETUP.md section.
+
+**Env vars at boot.** When `bitbucket.enabled` is `true` AND a non-empty `BITBUCKET_TOKEN` is available locally, `deploy.sh` exports the following before TPM boots:
+- `SWT_BB_ENABLED` — `"true"` or `"false"`.
+- `SWT_BB_FLAVOR` — `cloud`.
+
+`BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE` are intentionally NOT exported to TPM — only `bb-curl.sh` sources them from `${SWT_SECRETS_PATH}` at call time. `deploy.sh` also exports `SWT_BB_WORKSPACE_DISPLAY` — a non-secret, display-only var (the workspace slug) used by the boot info-box. It is safe to log; the token is never in any TPM-visible env var. The workspace slug is resolved inside the wrapper at invocation time. Read `SWT_BB_ENABLED` and `SWT_BB_FLAVOR` in your boot info-box rendering and in any SWE assignment that needs Bitbucket access.
+
+**The bb-curl wrapper.** Agents perform direct Bitbucket REST calls via `${SWT_DIR}/scripts/bb-curl.sh`. The wrapper injects the `Authorization` header, sources the workspace slug from the secrets file (alongside the credentials), applies the workspace base URL, and emits the JSON response on stdout. Example invocations — note that the workspace placeholder in the path is filled in by you (TPM/SWE) using the value the user has told you their workspace is, since the wrapper resolves the actual slug from the secrets file at call time but you still have to spell it in the URL path:
+
+```bash
+# Authenticated user info — quick smoke test
+bb-curl GET /user
+
+# List open PRs in a repo (replace <workspace> with your known slug, e.g. herzog)
+bb-curl GET /repositories/<workspace>/cmms-api/pullrequests?state=OPEN
+
+# Fetch a single PR's comments
+bb-curl GET /repositories/<workspace>/cmms-api/pullrequests/123/comments
+
+# Latest pipeline run on a branch
+bb-curl GET /repositories/<workspace>/cmms-api/pipelines/?target.branch=main&sort=-created_on&pagelen=1
+```
+
+The workspace slug in the URL path now comes from the secrets file (paired with the credentials) rather than from a TPM env var. If you need to confirm the workspace slug for path construction, ask the user — never read the secrets file yourself.
+
+`bb-curl` is verb-agnostic — agents call `GET` for read ops and `POST`/`PUT`/`PATCH`/`DELETE` for write ops at user direction (for example, the user might ask you to post a reply to a PR comment via `bb-curl POST /repositories/<workspace>/cmms-api/pullrequests/123/comments`).
+
+Agents NEVER construct raw `curl` calls with an `Authorization` header for Bitbucket — always go through `bb-curl`. This is part of the secrets hard rule.
+
+**Behavior matrix.**
+
+| Condition | TPM behavior |
+|-----------|--------------|
+| `bitbucket.enabled = false` | No Bitbucket access. Agents must not attempt `bb-curl`. If the user asks for PR/pipeline data, point them at `deploy.sh --setup-bitbucket`. |
+| `bitbucket.enabled = true` AND all three secrets present (`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE` all non-empty in the secrets file) | Full access via `bb-curl`. Include the wrapper in SWE assignments when the task needs PR/pipeline/comment data. |
+| `bitbucket.enabled = true` AND any secrets field missing (token, email, or workspace) | `deploy.sh` prints a warning at boot and forces `SWT_BB_ENABLED=false` for the session. Treat this exactly like the disabled case — same restrictions, same messaging. Validation requires all three secrets file fields. |
+
+**Hard rule reference.** All Bitbucket work is governed by the "NEVER read or echo secrets" hard rule (see Hard Rules section). Never read `${SWT_SECRETS_PATH}`. Never echo `BITBUCKET_TOKEN` or any other `*_TOKEN`/`*_SECRET`/`*_KEY`/`*_PASSWORD` env var. Never craft a raw `Authorization` header.
+
 ## Clipboard Image Reading
 
 The user may take a screenshot and ask you to look at it (e.g., "look at my clipboard", "I took a screenshot", "check this screenshot"). Terminal paste doesn't support images, but a PowerShell script at `${SWT_DIR}/scripts/clipboard-read.ps1` can save the clipboard image to a temp file.
@@ -1178,3 +1245,4 @@ When the user asks you to change any agent definition or adds a new feature:
 8. **STAY IN CWD** — work in the user's current working directory by default. Exceptions: (a) you may read/write Obsidian notes and Project-SWT files as needed. (b) you may read and write `swt_settings.json` at `SWT_SETTINGS_PATH` (this single file holds both the feedback log and the support apps map, plus the rest of user config). (c) If the user verbally redirects the session to a different path (e.g., "let's work on `/other/repo`"), treat that path as the new work repo for the remainder of the session and work in it freely — read AND write. You may redirect back to the original cwd on user request. In support mode, this redirect exception covers each app path listed in `support.apps` — pivoting to another app's path is a fresh redirect under this same clause.
 9. **NO DOTNET COMMANDS** — agents NEVER run any `dotnet` CLI commands (`dotnet run`, `dotnet test`, `dotnet build`, `dotnet restore`, `dotnet ef`, etc.). Only the user runs dotnet commands. Do not instruct subagents to run dotnet commands. If a build or test run is needed, tell the user.
 10. **READ-ONLY DATABASE ACCESS — ALLOWLIST ONLY** — never provide a database connection name to a SWE that isn't sourced directly from the `SWT_DB_CONNECTION` env var (which itself comes from the `database.allowlist` in `swt_settings.json`). Never enable database access in SWE assignments when `SWT_DB_ENABLED` is not `"true"`. Database access is SELECT-only — never instruct subagents to run INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or EXEC statements.
+11. **NEVER read or echo secrets.** Do not read the SWT secrets file directly (its location is exported as `${SWT_SECRETS_PATH}` by `deploy.sh`). Do not echo, log, or include in any output the values of environment variables matching `*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`. For Bitbucket operations, use `scripts/bb-curl.sh` — never construct raw `Authorization` headers in any command.

@@ -346,6 +346,14 @@ if [ -n "$WIN_HOME_DIR" ]; then
 fi
 export SWT_SETTINGS_PATH
 
+# Secrets file lives alongside swt_settings.json in the Windows home directory
+# so it follows the same single-source-of-truth model as user config.
+SWT_SECRETS_PATH=""
+if [ -n "$WIN_HOME_DIR" ]; then
+    SWT_SECRETS_PATH="${WIN_HOME_DIR}/.swt_secrets"
+fi
+export SWT_SECRETS_PATH
+
 # Build the initial JSON document (seeded from swt.yml + optional MD migration)
 # and write it to $SWT_SETTINGS_PATH. Idempotent — does nothing if file exists.
 _ensure_settings_file() {
@@ -506,7 +514,7 @@ for raw in os.environ.get('SUPPORT_MD', '').splitlines():
         repos[app] = val
 
 doc = {
-    "_schema": 2,
+    "_schema": 3,
     "team": {
         "swe_count": _int(os.environ.get('SEED_SWE_COUNT'), 3),
         "swe_efficiency_cores": _int(os.environ.get('SEED_SWE_EFF'), 1),
@@ -539,8 +547,15 @@ doc = {
         "enabled": _bool(os.environ.get('SEED_SUPPORT_ENABLED'), True),
         "apps": repos,
     },
-    "statusline": {
+    "bitbucket": {
         "enabled": False,
+        "flavor": "cloud",
+        "auth": {
+            "token_source": "env:BITBUCKET_TOKEN",
+        },
+    },
+    "statusline": {
+        "enabled": True,
     },
 }
 
@@ -562,16 +577,20 @@ PY
 
 _ensure_settings_file || true
 
-# ── Schema Migration (v1 → v2) ────────────────────────────────────
+# ── Schema Migration (v1 → v2 → v3) ───────────────────────────────
 # v2 collapses support.{apps[], search_roots[], repos{}} into a single
-# support.apps{} map (APP → path|null) and bumps _schema to 2. Runs in-place
-# on an existing settings file; no-op if already on v2 (or higher), if the
-# file is missing, or if the JSON is malformed. Never fails the boot.
+# support.apps{} map (APP → path|null) and bumps _schema to 2.
+# v3 adds the bitbucket block (enabled/flavor/auth) after support and bumps
+# _schema to 3. (Workspace lives in $SWT_SECRETS_PATH, not settings.json.)
+# Runs in-place on an existing settings file; no-op if already at the latest
+# schema, if the file is missing, or if the JSON is malformed. A v1 file is
+# migrated through both steps in a single boot. Never fails the boot.
 _migrate_settings_schema() {
     [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ] || return 0
 
     SWT_SETTINGS_PATH="$SWT_SETTINGS_PATH" python3 - <<'PY' 2>/dev/null
 import json, os, shutil, sys, tempfile
+from collections import OrderedDict
 
 path = os.environ.get('SWT_SETTINGS_PATH', '')
 if not path:
@@ -579,21 +598,41 @@ if not path:
 
 try:
     with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+        data = json.load(f, object_pairs_hook=OrderedDict)
 except Exception:
     print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
     sys.exit(0)
 
-if not isinstance(data, dict):
+if not isinstance(data, (dict, OrderedDict)):
     print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
     sys.exit(0)
 
+
+def _atomic_write(payload):
+    """Atomic write via temp file + os.replace. Returns True on success."""
+    out_dir = os.path.dirname(path) or '.'
+    fd, tmp = tempfile.mkstemp(prefix='.swt_settings.', suffix='.tmp', dir=out_dir)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
+migrated_any = False
+
+# ── v1 → v2 ──────────────────────────────────────────────────────
 schema = data.get('_schema')
 support = data.get('support')
-
-# Detect v1-shaped support: array apps, or presence of search_roots/repos.
 v1_shape = (
-    isinstance(support, dict) and (
+    isinstance(support, (dict, OrderedDict)) and (
         isinstance(support.get('apps'), list)
         or 'search_roots' in support
         or 'repos' in support
@@ -611,43 +650,98 @@ if schema == 1 and v1_shape:
 
     old_apps = support.get('apps') or []
     old_repos = support.get('repos') or {}
-    new_apps_map = {}
+    new_apps_map = OrderedDict()
     if isinstance(old_apps, list):
         for app in old_apps:
             if not app:
                 continue
-            new_apps_map[app] = old_repos.get(app, None) if isinstance(old_repos, dict) else None
-    elif isinstance(old_apps, dict):
+            new_apps_map[app] = old_repos.get(app, None) if isinstance(old_repos, (dict, OrderedDict)) else None
+    elif isinstance(old_apps, (dict, OrderedDict)):
         # Defensive: if apps is somehow already an object, preserve it as-is.
         new_apps_map = old_apps
 
-    data['support'] = {
-        'enabled': support.get('enabled', True),
-        'apps': new_apps_map,
-    }
+    new_support = OrderedDict()
+    new_support['enabled'] = support.get('enabled', True)
+    new_support['apps'] = new_apps_map
+    data['support'] = new_support
     data['_schema'] = 2
 
-    # Atomic write via temp file in the same directory + rename.
-    out_dir = os.path.dirname(path) or '.'
-    fd, tmp = tempfile.mkstemp(prefix='.swt_settings.', suffix='.tmp', dir=out_dir)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-            f.write('\n')
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+    if not _atomic_write(data):
         print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
         sys.exit(0)
 
     print(f"[swt] migrated swt_settings.json schema 1 → 2 (backup: {backup_path})")
+    migrated_any = True
+    # Re-read schema so the v2 → v3 step runs against the just-written state.
+    schema = data.get('_schema')
+
+# ── v2 → v3 ──────────────────────────────────────────────────────
+# Detect v2: _schema == 2 OR (schema unset/legacy AND bitbucket block missing).
+needs_v3 = (schema == 2) and ('bitbucket' not in data)
+
+if needs_v3:
+    # Backup the v2 file before mutating (only if no backup exists yet).
+    backup_path_v2 = path + '.v2.bak'
+    if not os.path.exists(backup_path_v2):
+        try:
+            shutil.copy2(path, backup_path_v2)
+        except Exception as e:
+            print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
+
+    bitbucket_block = OrderedDict()
+    bitbucket_block['enabled'] = False
+    bitbucket_block['flavor'] = 'cloud'
+    auth_block = OrderedDict()
+    auth_block['token_source'] = 'env:BITBUCKET_TOKEN'
+    bitbucket_block['auth'] = auth_block
+
+    # Insert bitbucket block immediately after 'support' to preserve key order.
+    new_data = OrderedDict()
+    inserted = False
+    for k, v in data.items():
+        new_data[k] = v
+        if k == 'support' and not inserted:
+            new_data['bitbucket'] = bitbucket_block
+            inserted = True
+    if not inserted:
+        # Defensive: if 'support' wasn't present, append at the end (before _schema bump).
+        new_data['bitbucket'] = bitbucket_block
+
+    # Seed statusline block (after bitbucket) if not already present. Handles
+    # pristine v1 files that predate the statusline feature. Don't overwrite
+    # an existing statusline block — preserve the user's setting.
+    if 'statusline' not in new_data:
+        statusline_block = OrderedDict()
+        statusline_block['enabled'] = True
+        # Insert immediately after 'bitbucket' to match the canonical order
+        # (..., support, bitbucket, statusline, _schema).
+        reordered = OrderedDict()
+        sl_inserted = False
+        for k, v in new_data.items():
+            reordered[k] = v
+            if k == 'bitbucket' and not sl_inserted:
+                reordered['statusline'] = statusline_block
+                sl_inserted = True
+        if not sl_inserted:
+            reordered['statusline'] = statusline_block
+        new_data = reordered
+
+    new_data['_schema'] = 3
+    data = new_data
+
+    if not _atomic_write(data):
+        print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
+        sys.exit(0)
+
+    print(f"[swt] migrated swt_settings.json schema 2 → 3 (backup: {backup_path_v2})")
+    migrated_any = True
+    schema = data.get('_schema')
+
+if migrated_any:
     print('__SWT_SCHEMA_MIGRATED__')
-elif schema in (None, ) or not isinstance(schema, int):
+elif schema is None or not isinstance(schema, int):
     print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
-# else: schema >= 2 → silent no-op
+# else: schema >= 3 → silent no-op
 PY
 }
 
@@ -665,6 +759,56 @@ if [ -n "$_migration_output" ]; then
     done <<< "$_migration_output"
 fi
 unset _migration_output
+
+# ── Bitbucket Secret Resolution ───────────────────────────────────
+# Resolve Bitbucket credentials from $SWT_SECRETS_PATH when bitbucket.enabled is
+# true. The secrets file holds BITBUCKET_EMAIL, BITBUCKET_TOKEN, and
+# BITBUCKET_WORKSPACE (workspace is user-specific, paired with the email/token,
+# not project-level config). The token is sourced into the parent shell
+# environment so downstream tools (bb-curl) can use it; we never log, echo, or
+# otherwise expose the token value. If enabled but any of the three fields are
+# missing, downgrade SWT_BB_ENABLED to false so callers don't attempt broken
+# auth — the user is told how to fix it via --setup-bitbucket. Never fails the
+# boot.
+#
+# Workspace is NOT exported as SWT_BB_WORKSPACE (bb-curl re-sources the secrets
+# file itself). For info-box / diagnostic display only, we export
+# SWT_BB_WORKSPACE_DISPLAY — a non-secret display-only var safe to log/show.
+_resolve_bitbucket_secrets() {
+    local bb_enabled_raw bb_flavor
+    bb_enabled_raw="$(_json_get "$SWT_SETTINGS_PATH" bitbucket.enabled)"
+    if [ "${bb_enabled_raw:-false}" != "true" ]; then
+        export SWT_BB_ENABLED="false"
+        return 0
+    fi
+
+    bb_flavor="$(_json_get "$SWT_SETTINGS_PATH" bitbucket.flavor)"
+    export SWT_BB_FLAVOR="${bb_flavor:-cloud}"
+
+    # Source secrets file if present. Use `set +u` around the source to
+    # tolerate a partial/empty file under set -u.
+    if [ -n "$SWT_SECRETS_PATH" ] && [ -f "$SWT_SECRETS_PATH" ]; then
+        set +u
+        # shellcheck disable=SC1091
+        . "$SWT_SECRETS_PATH" 2>/dev/null || true
+        set -u
+    fi
+
+    if [ -z "${BITBUCKET_EMAIL:-}" ] || [ -z "${BITBUCKET_TOKEN:-}" ] || [ -z "${BITBUCKET_WORKSPACE:-}" ]; then
+        echo "[swt] ⚠ Bitbucket: $SWT_SECRETS_PATH is missing or BITBUCKET_EMAIL/BITBUCKET_TOKEN/BITBUCKET_WORKSPACE unset. Run: deploy.sh --setup-bitbucket"
+        export SWT_BB_ENABLED="false"
+        return 0
+    fi
+
+    export BITBUCKET_EMAIL
+    export BITBUCKET_TOKEN
+    # Display-only mirror of the workspace name; safe to log (not a secret).
+    # bb-curl re-sources the secrets file to get $BITBUCKET_WORKSPACE itself.
+    export SWT_BB_WORKSPACE_DISPLAY="${BITBUCKET_WORKSPACE}"
+    export SWT_BB_ENABLED="true"
+}
+
+_resolve_bitbucket_secrets || true
 
 # ── Agent Team Configuration ───────────────────────────────────────
 # Read team-size knobs from swt_settings.json (with sensible defaults). Falls
@@ -704,6 +848,33 @@ MODE="unconstrained"
 REMOTE=false
 MODE_SUPPORT=false
 MODE_BRANCH=false
+# Engine = the Claude Code-compatible binary swt will exec. Not read from env
+# (no env override per design) — only the --engine flag overrides this default.
+SWT_ENGINE="claude"
+
+# Pre-pass: extract --engine value before the main loop so it's available for
+# validation/diagnostics regardless of position. Supports --engine=<value> and
+# --engine <value>. Other flags handled in the main loop below.
+_engine_next=false
+for arg in "$@"; do
+    if [ "$_engine_next" = true ]; then
+        SWT_ENGINE="$arg"
+        _engine_next=false
+        continue
+    fi
+    case "$arg" in
+        --engine=*)
+            SWT_ENGINE="${arg#--engine=}"
+            ;;
+        --engine)
+            _engine_next=true
+            ;;
+    esac
+done
+if [ "$_engine_next" = true ]; then
+    echo "[swt] ✗ --engine requires a value (e.g., --engine=claude-rc)" >&2
+    exit 2
+fi
 
 for arg in "$@"; do
     case "$arg" in
@@ -714,7 +885,10 @@ for arg in "$@"; do
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --support          Support mode (scoped to apps in swt_settings.json)"
             echo "  swt --remote           Enable remote control (can combine with other flags)"
+            echo "  swt --engine=<binary>  Claude Code-compatible engine to launch (default: claude)."
+            echo "                         Examples: --engine=claude-rc, --engine=/path/to/custom-build."
             echo "  swt --setup            Install the swt launcher into ~/bin and update PATH"
+            echo "  swt --setup-bitbucket  Configure Bitbucket integration (flavor in settings.json; workspace/email/token in ~/.swt_secrets)"
             echo ""
             echo "Run from inside your work repo (Git Bash or WSL)."
             echo "Project-SWT: $SWT_DIR"
@@ -792,6 +966,185 @@ EOF
             echo "[swt] Setup complete. Run: swt --help"
             exit 0
             ;;
+        --setup-bitbucket)
+            # Interactive Bitbucket setup — prompts for workspace + flavor, writes
+            # `flavor` and `enabled` to swt_settings.json (atomic), and ensures
+            # $SWT_SECRETS_PATH exists with lines for BITBUCKET_EMAIL,
+            # BITBUCKET_TOKEN, and BITBUCKET_WORKSPACE. The workspace value is
+            # pre-populated into the secrets file template (it isn't a secret, the
+            # user just typed it), so the user only needs to fill in EMAIL and
+            # TOKEN by hand. Never prints or stores the token itself — the user
+            # pastes it into the secrets file directly.
+            echo ""
+            echo "Bitbucket Integration Setup"
+            echo "──────────────────────────"
+            echo ""
+
+            if [ -z "$SWT_SETTINGS_PATH" ] || [ ! -f "$SWT_SETTINGS_PATH" ]; then
+                echo "[swt] Error: swt_settings.json not found at $SWT_SETTINGS_PATH" >&2
+                echo "[swt] Run 'swt' once to seed the settings file, then re-run --setup-bitbucket." >&2
+                exit 1
+            fi
+
+            BB_WORKSPACE_INPUT=""
+            printf "Bitbucket workspace (e.g., herzog): "
+            IFS= read -r BB_WORKSPACE_INPUT || true
+            BB_WORKSPACE_INPUT="$(echo "$BB_WORKSPACE_INPUT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            if [ -z "$BB_WORKSPACE_INPUT" ]; then
+                echo "[swt] Error: workspace cannot be empty." >&2
+                exit 1
+            fi
+
+            BB_FLAVOR_INPUT=""
+            printf "Bitbucket flavor [cloud/server] (default: cloud): "
+            IFS= read -r BB_FLAVOR_INPUT || true
+            BB_FLAVOR_INPUT="$(echo "$BB_FLAVOR_INPUT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+            if [ -z "$BB_FLAVOR_INPUT" ]; then
+                BB_FLAVOR_INPUT="cloud"
+            fi
+            if [ "$BB_FLAVOR_INPUT" != "cloud" ] && [ "$BB_FLAVOR_INPUT" != "server" ]; then
+                echo "[swt] Error: flavor must be 'cloud' or 'server' (got: $BB_FLAVOR_INPUT)" >&2
+                exit 1
+            fi
+
+            # Atomically update swt_settings.json: bitbucket.flavor, .enabled.
+            # Workspace is NOT written to settings.json anymore — it lives in
+            # $SWT_SECRETS_PATH alongside the email and token (user-specific).
+            SWT_SETTINGS_PATH="$SWT_SETTINGS_PATH" \
+            BB_FLAVOR="$BB_FLAVOR_INPUT" \
+            python3 - <<'PY'
+import json, os, sys, tempfile
+from collections import OrderedDict
+
+path = os.environ['SWT_SETTINGS_PATH']
+flavor = os.environ['BB_FLAVOR']
+
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f, object_pairs_hook=OrderedDict)
+except Exception as e:
+    print(f"[swt] Error: could not read {path}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(data, (dict, OrderedDict)):
+    print(f"[swt] Error: {path} is not a JSON object", file=sys.stderr)
+    sys.exit(1)
+
+bb = data.get('bitbucket')
+if not isinstance(bb, (dict, OrderedDict)):
+    bb = OrderedDict()
+    auth = OrderedDict()
+    auth['token_source'] = 'env:BITBUCKET_TOKEN'
+    bb['enabled'] = True
+    bb['flavor'] = flavor
+    bb['auth'] = auth
+    data['bitbucket'] = bb
+else:
+    bb['enabled'] = True
+    bb['flavor'] = flavor
+    if not isinstance(bb.get('auth'), (dict, OrderedDict)):
+        auth = OrderedDict()
+        auth['token_source'] = 'env:BITBUCKET_TOKEN'
+        bb['auth'] = auth
+    elif 'token_source' not in bb['auth']:
+        bb['auth']['token_source'] = 'env:BITBUCKET_TOKEN'
+
+out_dir = os.path.dirname(path) or '.'
+fd, tmp = tempfile.mkstemp(prefix='.swt_settings.', suffix='.tmp', dir=out_dir)
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+    os.replace(tmp, path)
+except Exception as e:
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    print(f"[swt] Error: could not write {path}: {e}", file=sys.stderr)
+    sys.exit(1)
+PY
+            BB_WRITE_RC=$?
+            if [ "$BB_WRITE_RC" -ne 0 ]; then
+                echo "[swt] Failed to update swt_settings.json (see above)." >&2
+                exit 1
+            fi
+
+            echo ""
+            echo "[swt] ✓ Updated $SWT_SETTINGS_PATH (flavor: $BB_FLAVOR_INPUT)"
+
+            # Manage $SWT_SECRETS_PATH: create with template (chmod 600) if missing,
+            # otherwise verify it has BITBUCKET_EMAIL=, BITBUCKET_TOKEN=, and
+            # BITBUCKET_WORKSPACE= lines. The template pre-populates
+            # BITBUCKET_WORKSPACE with the value the user just entered (workspace
+            # isn't a secret) so only EMAIL and TOKEN need to be filled in by hand.
+            # Never read or print the token value.
+            if [ -z "$SWT_SECRETS_PATH" ]; then
+                echo "[swt] Error: SWT_SECRETS_PATH is unset (Windows home not resolved)." >&2
+                exit 1
+            fi
+            SECRETS_FILE="$SWT_SECRETS_PATH"
+            if [ ! -f "$SECRETS_FILE" ]; then
+                # Unquoted heredoc so $BB_WORKSPACE_INPUT expands. There are no
+                # other shell-special sequences in this template.
+                cat > "$SECRETS_FILE" <<SECRETS_EOF
+# SWT secrets — never commit this file.
+# === Bitbucket Cloud ===
+# Atlassian API token + email + workspace for Bitbucket Cloud (HTTP Basic auth).
+# Generate token at: https://id.atlassian.com/manage-profile/security/api-tokens
+# Required (read) scopes: read:bitbucket-account, read:bitbucket-pull-request, read:bitbucket-pipeline.
+# Optional (write) scope for posting/replying to PR comments: write:bitbucket-pull-request.
+BITBUCKET_EMAIL=
+BITBUCKET_TOKEN=
+BITBUCKET_WORKSPACE=${BB_WORKSPACE_INPUT}
+SECRETS_EOF
+                chmod 600 "$SECRETS_FILE"
+                echo "[swt] ✓ Created template at: $SECRETS_FILE (chmod 600)."
+                echo "[swt]   Pre-filled: BITBUCKET_WORKSPACE=$BB_WORKSPACE_INPUT"
+                echo ""
+                echo "[swt] Edit the file and fill in:"
+                echo "[swt]   BITBUCKET_EMAIL=your@atlassian-email.com"
+                echo "[swt]   BITBUCKET_TOKEN=your-api-token"
+                echo ""
+                echo "[swt] Then verify with: scripts/bb-curl.sh GET /user"
+            else
+                BB_HAS_EMAIL=false
+                BB_HAS_TOKEN=false
+                BB_HAS_WORKSPACE=false
+                if grep -q '^BITBUCKET_EMAIL=' "$SECRETS_FILE" 2>/dev/null; then
+                    BB_HAS_EMAIL=true
+                fi
+                if grep -q '^BITBUCKET_TOKEN=' "$SECRETS_FILE" 2>/dev/null; then
+                    BB_HAS_TOKEN=true
+                fi
+                if grep -q '^BITBUCKET_WORKSPACE=' "$SECRETS_FILE" 2>/dev/null; then
+                    BB_HAS_WORKSPACE=true
+                fi
+                if [ "$BB_HAS_EMAIL" = true ] && [ "$BB_HAS_TOKEN" = true ] && [ "$BB_HAS_WORKSPACE" = true ]; then
+                    echo "[swt] ✓ $SECRETS_FILE exists and contains BITBUCKET_EMAIL, BITBUCKET_TOKEN, and BITBUCKET_WORKSPACE lines"
+                else
+                    echo "[swt] ⚠ $SECRETS_FILE exists but is missing required line(s):"
+                    if [ "$BB_HAS_EMAIL" != true ]; then
+                        echo "[swt]   Add:  BITBUCKET_EMAIL=<your-atlassian-email>"
+                    fi
+                    if [ "$BB_HAS_TOKEN" != true ]; then
+                        echo "[swt]   Add:  BITBUCKET_TOKEN=<your-api-token>"
+                    fi
+                    if [ "$BB_HAS_WORKSPACE" != true ]; then
+                        echo "[swt]   Add:  BITBUCKET_WORKSPACE=$BB_WORKSPACE_INPUT"
+                    fi
+                fi
+            fi
+
+            echo ""
+            echo "[swt] Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens"
+            echo "[swt] Required (read) scopes: read:bitbucket-account, read:bitbucket-pull-request, read:bitbucket-pipeline."
+            echo "[swt] Optional (write) scope for posting/replying to PR comments: write:bitbucket-pull-request."
+            echo "[swt] Bitbucket Cloud uses HTTP Basic auth — pair the token with your Atlassian email."
+            echo "[swt] Once you've added both values, test with: scripts/bb-curl.sh GET /user"
+            echo ""
+            exit 0
+            ;;
         --remote)
             REMOTE=true
             ;;
@@ -801,12 +1154,44 @@ EOF
         --support)
             MODE_SUPPORT=true
             ;;
+        --engine=*)
+            # Already captured in the pre-pass — no-op here so it isn't flagged
+            # as unknown.
+            ;;
+        --engine)
+            # The pre-pass consumed the next token as the engine value. Skip the
+            # value here too so it isn't treated as an unknown flag.
+            _engine_skip=true
+            ;;
         *)
+            if [ "${_engine_skip:-false}" = true ]; then
+                _engine_skip=false
+                continue
+            fi
             echo "[swt] unknown flag: $arg" >&2
             exit 2
             ;;
     esac
 done
+
+# Validate the resolved engine immediately — fail fast on typos before any
+# downstream startup work runs. Accept either a name on PATH or an absolute
+# path to an executable file.
+if [ -z "$SWT_ENGINE" ]; then
+    echo "[swt] ✗ --engine value is empty" >&2
+    exit 1
+fi
+if [[ "$SWT_ENGINE" == /* ]]; then
+    if [ ! -x "$SWT_ENGINE" ]; then
+        echo "[swt] ✗ engine '$SWT_ENGINE' not found or not executable" >&2
+        echo "      Check the path, or pass a name on PATH: --engine=claude" >&2
+        exit 1
+    fi
+elif ! command -v "$SWT_ENGINE" >/dev/null 2>&1; then
+    echo "[swt] ✗ engine '$SWT_ENGINE' not found in PATH" >&2
+    echo "      Check the spelling, or pass an absolute path: --engine=/path/to/binary" >&2
+    exit 1
+fi
 
 # Validate flag combinations after parsing — --support and --branch are
 # mutually exclusive because they imply different session modes (support
@@ -1100,6 +1485,20 @@ else
     INFO_SUPPORT="Support: Disabled"
 fi
 
+# Bitbucket panel line: three states — Enabled (with workspace), Disabled, or
+# Enabled-but-token-missing (when bitbucket.enabled is true in settings but
+# _resolve_bitbucket_secrets downgraded SWT_BB_ENABLED to false). Workspace
+# now lives in the secrets file; SWT_BB_WORKSPACE_DISPLAY is the safe-to-log
+# mirror exported by _resolve_bitbucket_secrets.
+_BB_SETTING_ENABLED="$(_json_get "$SWT_SETTINGS_PATH" bitbucket.enabled)"
+if [ "${SWT_BB_ENABLED:-false}" = "true" ]; then
+    INFO_BITBUCKET="Bitbucket: Enabled (workspace: ${SWT_BB_WORKSPACE_DISPLAY:-unknown})"
+elif [ "${_BB_SETTING_ENABLED:-false}" = "true" ]; then
+    INFO_BITBUCKET="Bitbucket: Enabled (token missing — see setup-bitbucket)"
+else
+    INFO_BITBUCKET="Bitbucket: Disabled"
+fi
+
 INFO_BOARD=""
 if [ -n "$SWT_BOARD_URL" ]; then
     INFO_BOARD="Board: ${SWT_BOARD_URL}"
@@ -1145,6 +1544,7 @@ fi
 swt_line "$INFO_DB"
 swt_line "$INFO_FEEDBACK"
 swt_line "$INFO_SUPPORT"
+swt_line "$INFO_BITBUCKET"
 if [ -n "$INFO_BOARD" ]; then
     swt_line "$INFO_BOARD"
 fi
@@ -1152,6 +1552,21 @@ swt_line "$INFO_NOTES"
 printf "│%88s│\n" ""
 echo "╰${BORDER}╯"
 echo ""
+
+# Post-info-box diagnostics — single-line confirmations mirroring the panel.
+if [ "${SWT_BB_ENABLED:-false}" = "true" ]; then
+    echo "[swt] ✓ Bitbucket: enabled (workspace: ${SWT_BB_WORKSPACE_DISPLAY:-unknown})"
+elif [ "${_BB_SETTING_ENABLED:-false}" = "true" ]; then
+    echo "[swt] ✗ Bitbucket: enabled but token missing"
+else
+    echo "[swt] ✓ Bitbucket: disabled"
+fi
+
+# Surface the engine selection only when it differs from the default — keeps
+# the boot log quiet for the common case.
+if [ "$SWT_ENGINE" != "claude" ]; then
+    echo "[swt] ✓ Engine: $SWT_ENGINE"
+fi
 
 # ── Launch TPM ────────────────────────────────────────────────────
 echo "[swt] Starting TPM v${VERSION} in CLI mode..."
@@ -1166,8 +1581,8 @@ if [ "$REMOTE" = true ]; then
     echo "[swt] Remote control enabled"
 fi
 
-if ! command -v claude &>/dev/null; then
-    echo "[swt] Error: 'claude' command not found."
+if ! command -v "$SWT_ENGINE" >/dev/null 2>&1 && [ ! -x "$SWT_ENGINE" ]; then
+    echo "[swt] Error: '$SWT_ENGINE' command not found."
     if [ "$IS_WSL" = true ]; then
         echo "[swt] Install Node.js and Claude Code in WSL:"
         echo "[swt]   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -"
@@ -1180,9 +1595,11 @@ if ! command -v claude &>/dev/null; then
     exit 1
 fi
 
-# Verify claude actually runs (catches WSL finding Windows-side shim without node)
-if ! claude --version &>/dev/null; then
-    echo "[swt] Error: 'claude' was found at $(command -v claude) but failed to run."
+# Verify the engine actually runs (catches WSL finding a Windows-side shim
+# without node, or a stale alternate binary).
+if ! "$SWT_ENGINE" --version &>/dev/null; then
+    _engine_resolved="$(command -v "$SWT_ENGINE" 2>/dev/null || echo "$SWT_ENGINE")"
+    echo "[swt] Error: '$SWT_ENGINE' was found at $_engine_resolved but failed to run."
     if [ "$IS_WSL" = true ]; then
         echo "[swt] WSL is likely finding the Windows Claude installation, but Node.js"
         echo "[swt] is not installed natively in WSL."
@@ -1198,4 +1615,4 @@ if ! claude --version &>/dev/null; then
     exit 1
 fi
 
-exec claude "${CLAUDE_ARGS[@]}" "initiate"
+exec "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
