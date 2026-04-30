@@ -1199,13 +1199,49 @@ elif ! command -v "$SWT_ENGINE" >/dev/null 2>&1; then
     # Trim CR (WSL line-ending paranoia) and grab only the last line in case
     # bashrc emits noise on stdout before `type -t` runs.
     _engine_type=$(bash -ic "type -t '$SWT_ENGINE' 2>/dev/null" 2>/dev/null | tr -d '\r' | tail -1)
-    if [ "$_engine_type" = "alias" ] || [ "$_engine_type" = "function" ] || [ "$_engine_type" = "file" ]; then
-        SWT_ENGINE_NEEDS_INTERACTIVE=true
-    else
-        echo "[swt] ✗ engine '$SWT_ENGINE' not found in PATH (also not a shell alias/function)" >&2
-        echo "      Check the spelling, or pass an absolute path: --engine=/path/to/binary" >&2
-        exit 1
-    fi
+    case "$_engine_type" in
+        alias)
+            # Extract the alias body once at validation time so we can exec
+            # it later via plain `bash -c` (no -i) and avoid SIGTTOU
+            # job-control fights with downstream interactive children like
+            # the Claude TUI.
+            SWT_ENGINE_RESOLVED_BODY=$(bash -ic "alias '$SWT_ENGINE' 2>/dev/null" 2>/dev/null \
+                | tr -d '\r' \
+                | grep "^alias " \
+                | tail -1 \
+                | sed -E "s/^alias [^=]+='(.*)'\$/\1/")
+            if [ -z "$SWT_ENGINE_RESOLVED_BODY" ]; then
+                echo "[swt] ✗ engine '$SWT_ENGINE' detected as alias but body could not be parsed" >&2
+                echo "      Pass an absolute path: --engine=/path/to/binary" >&2
+                exit 1
+            fi
+            SWT_ENGINE_NEEDS_INTERACTIVE=true
+            ;;
+        function)
+            # Extract the function definition; the resolved body declares
+            # the function then invokes it by name so the inner `bash -c`
+            # has it in scope.
+            _engine_func_def=$(bash -ic "declare -f '$SWT_ENGINE' 2>/dev/null" 2>/dev/null | tr -d '\r')
+            if [ -z "$_engine_func_def" ]; then
+                echo "[swt] ✗ engine '$SWT_ENGINE' detected as function but definition could not be extracted" >&2
+                exit 1
+            fi
+            SWT_ENGINE_RESOLVED_BODY="${_engine_func_def}
+${SWT_ENGINE}"
+            SWT_ENGINE_NEEDS_INTERACTIVE=true
+            ;;
+        file)
+            # Sourced from a bashrc-modified PATH. Resolve via interactive
+            # shell at exec time as a last resort. Rare; most users won't
+            # hit this.
+            SWT_ENGINE_NEEDS_INTERACTIVE=true
+            ;;
+        *)
+            echo "[swt] ✗ engine '$SWT_ENGINE' not found in PATH (also not a shell alias/function)" >&2
+            echo "      Check the spelling, or pass an absolute path: --engine=/path/to/binary" >&2
+            exit 1
+            ;;
+    esac
 fi
 
 # Validate flag combinations after parsing — --support and --branch are
@@ -1611,11 +1647,18 @@ if ! command -v "$SWT_ENGINE" >/dev/null 2>&1 && [ ! -x "$SWT_ENGINE" ] && [ "$S
 fi
 
 # Verify the engine actually runs (catches WSL finding a Windows-side shim
-# without node, or a stale alternate binary). For interactive-shell aliases,
-# route the smoke test through `bash -ic` so the alias expands.
+# without node, or a stale alternate binary). For interactive-shell aliases
+# and functions, use the resolved body via plain `bash -c` so we don't fight
+# job control. The `file` fallback still routes through `bash -ic`.
 if [ "$SWT_ENGINE_NEEDS_INTERACTIVE" = true ]; then
     _smoke_ok=true
-    bash -ic "$SWT_ENGINE --version" &>/dev/null || _smoke_ok=false
+    if [ -n "$SWT_ENGINE_RESOLVED_BODY" ]; then
+        # Plain `bash -c` with the resolved body — no -i, no SIGTTOU risk.
+        bash -c "$SWT_ENGINE_RESOLVED_BODY --version" &>/dev/null || _smoke_ok=false
+    else
+        # Last-resort `file`-type fallback: route through bash -ic.
+        bash -ic "$SWT_ENGINE --version" &>/dev/null || _smoke_ok=false
+    fi
 else
     _smoke_ok=true
     "$SWT_ENGINE" --version &>/dev/null || _smoke_ok=false
@@ -1643,10 +1686,21 @@ if [ "$_smoke_ok" != true ]; then
 fi
 
 if [ "$SWT_ENGINE_NEEDS_INTERACTIVE" = true ]; then
-    # Route through interactive bash so user-defined aliases/functions in
-    # ~/.bashrc resolve. The alias is invoked with "$@" so positional args
-    # passed after the `bash -ic` command line flow through.
-    exec bash -ic "$SWT_ENGINE \"\$@\"" "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+    if [ -n "$SWT_ENGINE_RESOLVED_BODY" ]; then
+        # Exec via plain `bash -c` so the resolved alias/function body runs
+        # without the job-control complications of an interactive shell
+        # (which can SIGTTOU-stop the process group when the Claude TUI
+        # tries to take terminal control). The `\"\$@\"` stays literal for
+        # the inner shell, which expands it from the positional args we
+        # pass after the -c string.
+        exec bash -c "$SWT_ENGINE_RESOLVED_BODY \"\$@\"" "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+    else
+        # Last-resort `file`-type fallback: route through bash -ic. This
+        # path can hit the SIGTTOU footgun in some terminals, but it only
+        # triggers when a user's bashrc puts a binary on PATH that the
+        # script's PATH didn't see — pathological enough we accept the risk.
+        exec bash -ic "$SWT_ENGINE \"\$@\"" "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+    fi
 else
     exec "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
 fi
