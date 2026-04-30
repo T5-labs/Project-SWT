@@ -1181,6 +1181,12 @@ if [ -z "$SWT_ENGINE" ]; then
     echo "[swt] ✗ --engine value is empty" >&2
     exit 1
 fi
+
+# Track whether the engine resolves only inside an interactive shell — e.g.,
+# user-defined aliases or functions in ~/.bashrc. When true, both the version
+# smoke test and the final exec route through `bash -ic` so the alias expands.
+SWT_ENGINE_NEEDS_INTERACTIVE=false
+
 if [[ "$SWT_ENGINE" == /* ]]; then
     if [ ! -x "$SWT_ENGINE" ]; then
         echo "[swt] ✗ engine '$SWT_ENGINE' not found or not executable" >&2
@@ -1188,9 +1194,18 @@ if [[ "$SWT_ENGINE" == /* ]]; then
         exit 1
     fi
 elif ! command -v "$SWT_ENGINE" >/dev/null 2>&1; then
-    echo "[swt] ✗ engine '$SWT_ENGINE' not found in PATH" >&2
-    echo "      Check the spelling, or pass an absolute path: --engine=/path/to/binary" >&2
-    exit 1
+    # Fallback: maybe it's a shell alias/function defined in ~/.bashrc that
+    # only loads in interactive shells. Probe via `bash -ic` to find out.
+    # Trim CR (WSL line-ending paranoia) and grab only the last line in case
+    # bashrc emits noise on stdout before `type -t` runs.
+    _engine_type=$(bash -ic "type -t '$SWT_ENGINE' 2>/dev/null" 2>/dev/null | tr -d '\r' | tail -1)
+    if [ "$_engine_type" = "alias" ] || [ "$_engine_type" = "function" ] || [ "$_engine_type" = "file" ]; then
+        SWT_ENGINE_NEEDS_INTERACTIVE=true
+    else
+        echo "[swt] ✗ engine '$SWT_ENGINE' not found in PATH (also not a shell alias/function)" >&2
+        echo "      Check the spelling, or pass an absolute path: --engine=/path/to/binary" >&2
+        exit 1
+    fi
 fi
 
 # Validate flag combinations after parsing — --support and --branch are
@@ -1581,7 +1596,7 @@ if [ "$REMOTE" = true ]; then
     echo "[swt] Remote control enabled"
 fi
 
-if ! command -v "$SWT_ENGINE" >/dev/null 2>&1 && [ ! -x "$SWT_ENGINE" ]; then
+if ! command -v "$SWT_ENGINE" >/dev/null 2>&1 && [ ! -x "$SWT_ENGINE" ] && [ "$SWT_ENGINE_NEEDS_INTERACTIVE" != true ]; then
     echo "[swt] Error: '$SWT_ENGINE' command not found."
     if [ "$IS_WSL" = true ]; then
         echo "[swt] Install Node.js and Claude Code in WSL:"
@@ -1596,9 +1611,21 @@ if ! command -v "$SWT_ENGINE" >/dev/null 2>&1 && [ ! -x "$SWT_ENGINE" ]; then
 fi
 
 # Verify the engine actually runs (catches WSL finding a Windows-side shim
-# without node, or a stale alternate binary).
-if ! "$SWT_ENGINE" --version &>/dev/null; then
-    _engine_resolved="$(command -v "$SWT_ENGINE" 2>/dev/null || echo "$SWT_ENGINE")"
+# without node, or a stale alternate binary). For interactive-shell aliases,
+# route the smoke test through `bash -ic` so the alias expands.
+if [ "$SWT_ENGINE_NEEDS_INTERACTIVE" = true ]; then
+    _smoke_ok=true
+    bash -ic "$SWT_ENGINE --version" &>/dev/null || _smoke_ok=false
+else
+    _smoke_ok=true
+    "$SWT_ENGINE" --version &>/dev/null || _smoke_ok=false
+fi
+if [ "$_smoke_ok" != true ]; then
+    if [ "$SWT_ENGINE_NEEDS_INTERACTIVE" = true ]; then
+        _engine_resolved="$SWT_ENGINE (shell alias/function)"
+    else
+        _engine_resolved="$(command -v "$SWT_ENGINE" 2>/dev/null || echo "$SWT_ENGINE")"
+    fi
     echo "[swt] Error: '$SWT_ENGINE' was found at $_engine_resolved but failed to run."
     if [ "$IS_WSL" = true ]; then
         echo "[swt] WSL is likely finding the Windows Claude installation, but Node.js"
@@ -1615,4 +1642,11 @@ if ! "$SWT_ENGINE" --version &>/dev/null; then
     exit 1
 fi
 
-exec "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+if [ "$SWT_ENGINE_NEEDS_INTERACTIVE" = true ]; then
+    # Route through interactive bash so user-defined aliases/functions in
+    # ~/.bashrc resolve. The alias is invoked with "$@" so positional args
+    # passed after the `bash -ic` command line flow through.
+    exec bash -ic "$SWT_ENGINE \"\$@\"" "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+else
+    exec "$SWT_ENGINE" "${CLAUDE_ARGS[@]}" "initiate"
+fi
