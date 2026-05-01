@@ -2,13 +2,14 @@
 # swt-statusline.sh — Claude Code statusLine hook for Project-SWT.
 #
 # Emits exactly one line on stdout (no trailing newline) describing the
-# current SWT version and, optionally, the user's 5-hour Claude usage.
+# current SWT version and, optionally, the user's session token usage.
 #
 # Behavior:
 #   - Always shows [SWT v<version>].
 #   - If swt_settings.json -> statusline.enabled is true AND the JSON
-#     payload on stdin contains rate_limits.five_hour with both
-#     used_percentage and resets_at, also shows "5h <pct>% · resets <HH:MM AM/PM>".
+#     payload on stdin contains both context_window.total_input_tokens +
+#     total_output_tokens AND context_window.used_percentage, also shows
+#     "<tokens> · <pct>%" — e.g. "142k · 62%".
 #   - On ANY error the script must NOT fail and must NOT print error text;
 #     it falls back to [SWT v<version>] (or [SWT vunknown] if VERSION is unreadable).
 #
@@ -42,13 +43,13 @@ payload="$(cat 2>/dev/null)" || payload=""
 
 # --- 3. Ask python3 to do all the JSON work in one shot.
 # Inputs via env: SETTINGS_FILE, PAYLOAD.
-# Outputs on stdout: "<enabled>|<pct_or_empty>|<epoch_or_empty>"
+# Outputs on stdout: "<enabled>|<tokens_str_or_empty>|<pct_or_empty>"
 parsed="$(SETTINGS_FILE="$SETTINGS_FILE" PAYLOAD="$payload" python3 - <<'PY' 2>/dev/null
 import json, os, sys
 
 enabled = "0"
+tokens_str = ""
 pct = ""
-epoch = ""
 
 # settings -> statusline.enabled
 try:
@@ -61,45 +62,53 @@ try:
 except Exception:
     pass
 
-# stdin payload -> rate_limits.five_hour.{used_percentage, resets_at}
+def fmt_tokens(n):
+    # Human-friendly: <1k -> "<N>", 1k-999k -> "<N>k", >=1M -> "<N.N>M"
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n // 1000}k"
+    return f"{n / 1_000_000:.1f}M"
+
+# stdin payload -> context_window.{total_input_tokens, total_output_tokens, used_percentage}
 raw = os.environ.get("PAYLOAD", "")
 if raw.strip():
     try:
         p = json.loads(raw)
-        rl = p.get("rate_limits") if isinstance(p, dict) else None
-        fh = rl.get("five_hour") if isinstance(rl, dict) else None
-        if isinstance(fh, dict):
-            up = fh.get("used_percentage")
-            ra = fh.get("resets_at")
+        cw = p.get("context_window") if isinstance(p, dict) else None
+        if isinstance(cw, dict):
+            ti = cw.get("total_input_tokens")
+            to = cw.get("total_output_tokens")
+            up = cw.get("used_percentage")
+            if isinstance(ti, (int, float)) and isinstance(to, (int, float)):
+                total = int(ti) + int(to)
+                if total >= 0:
+                    tokens_str = fmt_tokens(total)
             if isinstance(up, (int, float)):
-                pct = str(int(round(up)))
-            if isinstance(ra, (int, float)) and ra > 0:
-                epoch = str(int(ra))
+                p_int = int(round(up))
+                if p_int < 0:
+                    p_int = 0
+                pct = str(p_int)
     except Exception:
         pass
 
-sys.stdout.write(f"{enabled}|{pct}|{epoch}")
+sys.stdout.write(f"{enabled}|{tokens_str}|{pct}")
 PY
 )"
 
 # Defensive split (if python3 itself failed, parsed will be empty -> all defaults).
 enabled="${parsed%%|*}"
 rest="${parsed#*|}"
-pct="${rest%%|*}"
-epoch="${rest#*|}"
+tokens_str="${rest%%|*}"
+pct="${rest#*|}"
 [ "$enabled" != "1" ] && enabled="0"
 
 # --- 4. Format the output line ---
-if [ "$enabled" = "1" ] && [ -n "$pct" ] && [ -n "$epoch" ]; then
-    reset_str="$(date -d "@${epoch}" '+%-I:%M %p' 2>/dev/null)"
-    if [ -n "$reset_str" ]; then
-        if [ "$pct" -ge 85 ] 2>/dev/null; then
-            printf '[SWT v%s │ 5h \033[31m%s%%\033[0m · resets %s]' "$version" "$pct" "$reset_str"
-        else
-            printf '[SWT v%s │ 5h %s%% · resets %s]' "$version" "$pct" "$reset_str"
-        fi
+if [ "$enabled" = "1" ] && [ -n "$tokens_str" ] && [ -n "$pct" ]; then
+    if [ "$pct" -ge 85 ] 2>/dev/null; then
+        printf '[SWT v%s │ %s · \033[31m%s%%\033[0m]' "$version" "$tokens_str" "$pct"
     else
-        printf '[SWT v%s]' "$version"
+        printf '[SWT v%s │ %s · %s%%]' "$version" "$tokens_str" "$pct"
     fi
 else
     printf '[SWT v%s]' "$version"

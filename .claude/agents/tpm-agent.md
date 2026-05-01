@@ -1676,7 +1676,7 @@ The user may take a screenshot and ask you to look at it (e.g., "look at my clip
 
 ## Statusline Display
 
-The Claude Code statusline renders a single line beneath the prompt on every turn. SWT plugs into it to show the current version and (when available) the user's 5-hour usage window, so the user always knows which SWT they're talking to and how much runway they have left.
+The Claude Code statusline renders a single line beneath the prompt on every turn. SWT plugs into it to show the current version and (when available) the cumulative session token spend plus current context-window usage, so the user always knows which SWT they're talking to, how many tokens they've consumed this session, and how full the context window is getting.
 
 **The script.** `${SWT_DIR}/scripts/swt-statusline.sh` is a bash script that reads the harness payload from stdin (JSON), reads `swt_settings.json` to check whether the statusline is enabled, and emits a single line on stdout. Dependencies are bash + python3 — `jq` is NOT used (it's not installed in WSL). The script never fails: every error path falls back silently to the short form.
 
@@ -1706,12 +1706,12 @@ This is a one-time install step done with the `update-config` skill or a direct 
 
 | Condition | Output |
 |-----------|--------|
-| `statusline.enabled = true` AND `rate_limits.five_hour` present in payload | `[SWT vX.Y.Z │ 5h 47% · resets 7:32 PM]` |
-| `statusline.enabled = true` AND `rate_limits` absent (early session, API-key auth, non-Pro/Max plan) | `[SWT vX.Y.Z]` |
+| `statusline.enabled = true` AND `context_window.{total_input_tokens, total_output_tokens, used_percentage}` present in payload | `[SWT vX.Y.Z │ 142k · 62%]` (context % renders in red when ≥85%) |
+| `statusline.enabled = true` AND `context_window` absent (early in session before the first API response, or environments that don't pass `context_window` in the payload) | `[SWT vX.Y.Z]` |
 | `statusline.enabled = false` | `[SWT vX.Y.Z]` |
 | `swt_settings.json` unreadable or any error in the script | `[SWT vX.Y.Z]` (silent fallback — no error text leaks) |
 
-**Caveat.** `rate_limits` is a Claude.ai Pro/Max-only field in the harness payload. API-key users will always see the version-only form regardless of the toggle — this is expected, not a bug.
+**Data source.** Cumulative session tokens come from `context_window.total_input_tokens + context_window.total_output_tokens`. Context percentage comes from `context_window.used_percentage` — this is the value to use for accurate context state (it's computed from input + cache_creation + cache_read and matches what `/context` shows), rather than deriving a percentage from the cumulative totals. `context_window` is plan-tier-agnostic — it's session token tracking, so Pro/Max plan status is not a factor. The version-only fallback simply means the harness hasn't yet sent a payload with `context_window` populated (typically only the very first prompt of a session).
 
 **Conversational enable/disable.** When the user says "turn on the statusline", "show my usage in the statusline", "turn off the statusline", or similar — flip `statusline.enabled` in `swt_settings.json` via Read+Write (preserve the rest of the file) and confirm the change back to the user. If the `statusline` block doesn't exist yet, add it. The change takes effect on the next prompt the harness renders — no restart needed.
 

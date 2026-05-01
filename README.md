@@ -19,7 +19,7 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
 - **Database access** — Read-only SQL queries via LINQPad for schema exploration and data inspection
-- **Statusline display** — Claude Code statusline shows your SWT version and current 5-hour Claude usage window when enabled
+- **Statusline display** — Claude Code statusline shows your SWT version and (when available) cumulative session tokens + current context-window usage when enabled
 - **Bitbucket integration** — Optional opt-in REST access for PR / pipeline / comment queries via secure local secrets file. See [`docs/bitbucket-integration.md`](docs/bitbucket-integration.md) for the architecture and decisions reference.
 - **Cross-platform** — Works in both Git Bash and WSL with automatic path translation and a single shared launcher
 - **One-command setup** — `deploy.sh --setup` configures everything (launcher, PATH, platform detection)
@@ -189,7 +189,7 @@ Top-level keys and what they contain:
 | `support` | Support mode `enabled` flag and `apps{}` map of app name → repo path or `null` (auto-discovered on boot) |
 | `monitor` | Monitor mode settings — polling interval, file threshold, per-category policies, counter-response prompt |
 | `review` | Review mode posting settings — `enabled` toggle, `comment_posting_prompt`, `min_rating_to_post` threshold |
-| `statusline` | Statusline display config (`enabled` flag — shows SWT version + 5-hour Claude usage window in Claude Code) |
+| `statusline` | Statusline display config (`enabled` flag — shows SWT version + cumulative session tokens + context-window % in Claude Code) |
 | `bitbucket` | Bitbucket Cloud integration toggle and flavor (`enabled`, `flavor`). Off by default. Workspace/email/token live in the user's secrets file (`${SWT_SECRETS_PATH}`). |
 
 To edit a value: open `swt_settings.json` directly in any text editor, or ask TPM *"update my Obsidian path to X"* and TPM will make the edit for you.
@@ -517,7 +517,7 @@ Project-SWT/
 ├── scripts/
 │   ├── bb-curl.sh               # Bitbucket REST wrapper (sources secrets locally, never exposes token)
 │   ├── clipboard-read.ps1       # Saves Windows clipboard image to temp file
-│   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + 5-hour Claude usage)
+│   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + session tokens + context %)
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml               # Deprecated seed template — used only on first boot

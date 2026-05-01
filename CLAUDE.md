@@ -245,7 +245,7 @@ Optional, opt-in Bitbucket Cloud REST integration for querying and posting to PR
 
 ## Statusline Display
 
-The Claude Code statusline shows the SWT version on every line, and (when available) the user's current 5-hour usage window — e.g., `[SWT vX.Y.Z │ 5h 47% · resets 7:32 PM]`. When rate-limit data isn't present in the harness payload (early in a session, API-key auth, or non-Pro/Max plan), it falls back to the version-only form `[SWT vX.Y.Z]`. The toggle lives in `swt_settings.json` under `statusline.enabled`. The script lives at `scripts/swt-statusline.sh` and is wired into the harness via `~/.claude/settings.json` (`statusLine.command`). The script never fails — every error path falls back silently to the short form. See the Statusline Display section in `tpm-agent.md` for full behavior, the state matrix, and how the user enables/disables it conversationally.
+The Claude Code statusline shows the SWT version on every line, and (when available) the cumulative session token spend plus current context-window usage — e.g., `[SWT vX.Y.Z │ 142k · 62%]` (142k cumulative input+output tokens this session, 62% of the context window in use). When token data isn't present in the harness payload (early in a session, before the first response; or environments that don't pass `context_window` fields), it falls back to the version-only form `[SWT vX.Y.Z]`. Context percentage ≥85% renders in red as a soft warning. The toggle lives in `swt_settings.json` under `statusline.enabled`. The script lives at `scripts/swt-statusline.sh` and is wired into the harness via `~/.claude/settings.json` (`statusLine.command`). The script never fails — every error path falls back silently to the short form. See the Statusline Display section in `tpm-agent.md` for full behavior, the state matrix, and how the user enables/disables it conversationally.
 
 ## .NET Guardrails
 
@@ -364,7 +364,7 @@ Project-SWT/
 ├── scripts/
 │   ├── bb-curl.sh                         # Bitbucket REST wrapper (sources secrets locally, never exposes token)
 │   ├── clipboard-read.ps1                 # Saves Windows clipboard image to temp file
-│   └── swt-statusline.sh                  # Renders the Claude Code statusline (version + 5h usage)
+│   └── swt-statusline.sh                  # Renders the Claude Code statusline (version + session tokens + context %)
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml                        # DEPRECATED — first-boot seed only (see swt_settings.json)
