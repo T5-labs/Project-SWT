@@ -11,9 +11,10 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Multi-session continuity** — Handoff summaries let you pick up exactly where you left off
 - **Feedback Log** — Persistent idea log. Say "log this for later" to append entries; surfaced on each boot.
 - **Preview mode** — Dry-run code changes for review before any files are touched
-- **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings
+- **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings; type `post <ordinals>` to share selected findings as Bitbucket PR comments with a confirmation gate
 - **Fresh Branch Planning** — Auto-detects zero-commit branches on `swt --branch` and deploys 3 SWEs in parallel (architecture, implementation, test-strategy lenses) to plan the ticket from its Jira AC, with the plan logged to Obsidian notes
 - **Support Mode** — Multi-app support sessions via `swt --support`. Auto-discovers configured app repos, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate.
+- **Monitor Mode** — Watches a Bitbucket PR for incoming comments (`swt --branch --monitor`). Classifies each comment, auto-resolves or surfaces per policy, and posts counter-responses after you push. The ticket is auto-detected from the current git branch name. Requires Bitbucket integration.
 - **QA verification** — Automated code review of SWE changes plus Playwright test generation
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
@@ -141,6 +142,7 @@ swt --help
 |---------|-------------|
 | `swt` | Unconstrained mode — general team, no ticket context |
 | `swt --branch` | Constrained mode — auto-detect ticket from git branch name |
+| `swt --branch --monitor` | Monitor mode — watch PR for new comments and coordinate responses (ticket auto-detected from branch name) |
 | `swt --remote` | Enable Claude Code remote control (can combine with other flags) |
 | `swt --setup` | Install the `swt` launcher into `~/bin` and add it to PATH |
 | `swt --support` | Support mode — multi-app investigation sessions |
@@ -149,10 +151,11 @@ swt --help
 **Examples:**
 
 ```bash
-swt --branch                     # Detect ticket from branch, e.g. bugfix/CMMS-2576-fix → CMMS-2576
-swt --branch --remote            # Constrained + remote control
-swt --remote                     # Unconstrained + remote control
-swt --support                    # Support mode — multi-app investigation session
+swt --branch                          # Detect ticket from branch, e.g. bugfix/CMMS-2576-fix → CMMS-2576
+swt --branch --monitor                # Constrained + PR comment watch loop (ticket auto-detected from branch)
+swt --branch --remote                 # Constrained + remote control
+swt --remote                          # Unconstrained + remote control
+swt --support                         # Support mode — multi-app investigation session
 ```
 
 ### Global Flags
@@ -176,7 +179,7 @@ Top-level keys and what they contain:
 
 | Key | Description |
 |-----|-------------|
-| `_schema` | Schema version for future migrations (currently 3) |
+| `_schema` | Schema version for future migrations (currently 5) |
 | `team` | Agent core counts and limits (`swe_count`, `swe_performance_cores`, `swe_efficiency_cores`, `qa_count`) |
 | `atlassian` | Jira cloud ID, site URL, board ID and URL |
 | `paths` | Obsidian vault path, Edge browser profile path, LINQPad runner path |
@@ -184,6 +187,8 @@ Top-level keys and what they contain:
 | `database` | Database toggle and `allowlist` map of project keys to LINQPad connection names |
 | `feedback` | Feedback log toggle and entries |
 | `support` | Support mode `enabled` flag and `apps{}` map of app name → repo path or `null` (auto-discovered on boot) |
+| `monitor` | Monitor mode settings — polling interval, file threshold, per-category policies, counter-response prompt |
+| `review` | Review mode posting settings — `enabled` toggle, `comment_posting_prompt`, `min_rating_to_post` threshold |
 | `statusline` | Statusline display config (`enabled` flag — shows SWT version + 5-hour Claude usage window in Claude Code) |
 | `bitbucket` | Bitbucket Cloud integration toggle and flavor (`enabled`, `flavor`). Off by default. Workspace/email/token live in the user's secrets file (`${SWT_SECRETS_PATH}`). |
 
@@ -328,6 +333,153 @@ If `swt --branch` detects a zero-commit branch, TPM auto-deploys 3 SWEs in paral
 
 When you wrap up, TPM writes a handoff summary to Obsidian notes (completed, in progress, pending, decisions, blockers). Next session picks up where you left off.
 
+## Monitor Mode
+
+Monitor Mode watches a Bitbucket PR for incoming comments and coordinates your response — so you never lose track of a CodeRabbit nitpick or a reviewer question buried in the thread.
+
+### Requirements
+
+- Bitbucket integration must be enabled (`deploy.sh --setup-bitbucket`)
+- Must be paired with `--branch`: `swt --branch --monitor`. The ticket is auto-detected from the current git branch name (e.g., a branch named `CMMS-1234-fix-foo` resolves to ticket `CMMS-1234`).
+- Mutually exclusive with `--support`
+- An open PR must exist on Bitbucket for the current branch. If none is found, TPM prompts to retry or exit.
+
+### How it works
+
+1. TPM resolves the open PR for your current branch, snapshots existing comments (they are not processed), then starts polling every `monitor.interval_seconds` (default: 5 minutes).
+2. Each new comment is classified into one of six categories: `nitpick`, `bug`, `style`, `architectural`, `security`, or `question`. Comments are auto-escalated to `risky_change` if they touch .NET-guarded files or exceed the file threshold — `risky_change` is an escalation bucket, not a classifier output.
+3. Per-category policy decides what happens: `resolve` auto-deploys a SWE to apply the change; `ask` adds it to the in-session todo list for you to decide. Changes to .NET-guarded files or involving more files than `monitor.risky_change_file_threshold` are automatically escalated to `risky_change`.
+4. Type `review` to see the todo list. Respond with `like <n>`, `revert <n>`, or `skip <n>` for each item.
+5. Commit and push your changes manually (TPM never does git writes). Then say `posted` — TPM reads the todo list and posts counter-responses back to Bitbucket using your configured `monitor.counter_response_prompt`. Reverted items are skipped — no reply is posted unless you explicitly ask.
+6. All activity is logged to the Obsidian ticket notes under `## PR Comments`.
+7. Press Ctrl+C to end the session.
+
+### Interaction grammar
+
+| Command | What it does |
+|---------|-------------|
+| `review` | Show the current todo list of pending comment actions |
+| `like <n>` | Mark item N as approved. For resolved items, this confirms the SWE's change. For ask items, this acknowledges the comment without code change. Counter-response posts on `posted`. |
+| `revert <n>` | Undo the change made for item N |
+| `skip <n>` | Dismiss item N without acting |
+| `posted` | Trigger TPM to post counter-responses on Bitbucket for all approved items. Reverted items are silently skipped (unless you explicitly say 'reply on the reverted ones'). |
+| `stop monitoring` / `exit monitor` | Halt the polling loop gracefully without exiting the session — TPM remains available for normal interaction |
+| Ctrl+C | Stop the monitor session |
+
+> **Multi-item:** Commands accept comma-separated ordinals — e.g., `like 1, 3, 5`, `revert 1, 3`, `skip 2`.
+
+### Example session
+
+```
+[TPM] Monitor mode active — watching PR #42 (CMMS-1234)
+[TPM] Baseline: 7 existing comments (not processed)
+[TPM] Polling every 300s...
+
+[TPM] New comment from coderabbit[bot] on src/Services/EquipmentService.cs:
+      "Consider null-checking `equipment` before accessing `.Id`"
+      → Classified: nitpick | Policy: resolve
+      → Deploying SWE-1 to add null guard
+
+[TPM] SWE-1 complete. Added null check on line 84 of EquipmentService.cs.
+      Added to todo list as item #1.
+
+> review
+[TPM] Todo list:
+  1. [resolved] SWE-1: added null check in EquipmentService.cs (nitpick from coderabbit)
+  2. [pending] Architectural concern: "Why is this logic in the service layer?" — awaiting your call
+
+> like 1
+> skip 2
+> posted
+[TPM] Posting counter-responses to PR #42...
+[TPM] Done. 1 reply posted.
+```
+
+### Configuration (`monitor` block in `swt_settings.json`)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `monitor.enabled` | Toggle monitor mode capability | `true` |
+| `monitor.interval_seconds` | How often to poll Bitbucket for new comments (seconds) | `300` |
+| `monitor.risky_change_file_threshold` | Auto-escalate to `risky_change` if a resolved comment touches more files than this | `5` |
+| `monitor.categories.{category}.action` | `"resolve"` (auto-apply via SWE) or `"ask"` (surface to user). Categories: `nitpick`, `bug`, `style`, `architectural`, `security`, `question`, `risky_change` | varies |
+| `monitor.categories.{category}.prompt` | Additional guidance for TPM when handling this category | varies; see seeded defaults in `deploy.sh` (e.g., `nitpick`: `"Apply the suggestion verbatim if reasonable."`, `style`: `"Match the surrounding style; don't refactor beyond the comment."`, others: `""`) |
+| `monitor.counter_response_prompt` | Instruction for TPM when composing replies posted back to Bitbucket | `"Reply professionally and concisely. Acknowledge the comment, state what was done (or why we disagree), and keep it to 1-2 sentences. No double-dashes."` |
+
+> **Note:** `risky_change.action` is always treated as `ask` regardless of config — this is a safety override to prevent auto-applying changes that were escalated specifically because they touched .NET-guarded files (`appsettings`, `.csproj`, etc.) or required NuGet/migration changes.
+
+## Review Mode Posting
+
+Review Mode Posting extends the automatic branch review (triggered on `swt --branch` when commits belong to a colleague) with the ability to share selected findings directly as Bitbucket PR comments. After the 3-SWE security/logic/quality scan completes and findings are displayed with ratings, the user types `post <ordinals>` to select which findings to post.
+
+### Requirements
+
+- Bitbucket integration must be enabled (`deploy.sh --setup-bitbucket`)
+- `review.enabled` must be `true` in `swt_settings.json`
+- Must be in review mode (branch commits by someone else, detected on `swt --branch`)
+
+### How it works
+
+1. The 3-SWE review scan runs as normal, producing ranked findings — each assigned a `Rating: N/5` (1 = trivial, 5 = critical).
+2. The user types `post <ordinals>` to choose findings to share.
+3. TPM polishes each selected finding into a 1-2 sentence professional comment using the configured `review.comment_posting_prompt`.
+4. TPM shows the polished comments and waits for approval before posting anything.
+5. The user responds with `ok` to post, `revise N: <change>` to adjust a specific comment, or `cancel` to abort.
+6. TPM posts approved comments via `bb-curl.sh`. Findings with a known `file:line` are placed as inline comments; others go to the PR overview.
+7. After posting, TPM annotates the Obsidian `## Branch Review` section with `[posted HH:MM — bitbucket-comment-id #<id>]` per finding.
+
+### Interaction grammar
+
+| Command | What it does |
+|---------|-------------|
+| `post 1` | Post finding #1 |
+| `post 1, 3` | Post findings #1 and #3 |
+| `post 2-4` | Post findings #2, #3, and #4 |
+| `post all` | Post all findings at or above `min_rating_to_post` |
+| `post all security` | Post all security-lens findings at or above `min_rating_to_post` |
+| `ok` | Confirm and post all polished comments shown |
+| `revise N: <change>` | Ask TPM to revise the polished comment for finding N before posting |
+| `cancel` | Abort — no comments are posted |
+
+> **Note:** `min_rating_to_post` only filters `post all` invocations. Explicit ordinals (`post 1`, `post 2-4`, etc.) always override the filter — any finding can be posted regardless of its rating when named directly.
+
+### Example session
+
+```
+[TPM] Review mode complete — 6 findings across security, logic, quality lenses.
+
+  1. [security] Rating: 4/5 — SQL query in ReportService.cs:142 builds a WHERE clause by
+     string concatenation; parameterize the query to prevent injection.
+  2. [logic]    Rating: 2/5 — EquipmentController.cs:88 returns HTTP 200 on a failed save
+     instead of 500; update the status code to reflect the error.
+  3. [quality]  Rating: 1/5 — Unused import in WorkOrderHelper.cs:3.
+
+> post 1, 2
+[TPM] Polishing 2 findings into PR comments...
+
+  Comment 1 (inline → ReportService.cs:142):
+    "The WHERE clause in `BuildFilterQuery` constructs SQL by concatenation — parameterize
+    this query to prevent SQL injection."
+
+  Comment 2 (inline → EquipmentController.cs:88):
+    "This path returns HTTP 200 on a failed save; consider returning 500 or 422 to signal
+    the error to callers."
+
+Type ok to post, revise N: <change> to adjust, or cancel to abort.
+
+> ok
+[TPM] Posted 2 comments to PR #37.
+[TPM] Obsidian ## Branch Review updated with post timestamps and comment IDs.
+```
+
+### Configuration (`review` block in `swt_settings.json`)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `review.enabled` | Toggle review mode posting capability | `true` |
+| `review.comment_posting_prompt` | Instruction for TPM when polishing findings into PR comments | `"Polish the finding into a 1-2 sentence professional PR comment. State the issue clearly and suggest a fix when one is obvious. No double-dashes."` |
+| `review.min_rating_to_post` | Minimum `Rating: N/5` for a finding to be included when using `post all` | `1` |
+
 ## Branch Detection
 
 `swt --branch` extracts the ticket from your git branch name. Supports prefixed and unprefixed branches:
@@ -399,10 +551,11 @@ Project-SWT/
   - `## Edge Cases` — discovered during development
   - `## Testing Procedures` — written collaboratively by TPM + user
   - `## QA Findings` — from QA review
-  - `## Branch Review` — findings from review-mode SWEs (security/logic/quality)
+  - `## Branch Review` — findings from review-mode SWEs (security/logic/quality), each with a `Rating: N/5`; posted findings annotated with `[posted HH:MM — bitbucket-comment-id #<id>]`
+  - `## PR Comments` — running log of incoming PR comments, classifications, actions taken, and counter-responses (monitor mode only)
   - `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
 
-  Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions.
+  Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions; PR Comments only appears for monitor-mode sessions.
 
 ## Modes
 
@@ -411,7 +564,8 @@ Project-SWT/
 | **Unconstrained** | `swt` | No ticket context. General team ready for whatever you need. |
 | **Constrained** | `swt --branch` | Detects ticket from git branch name. Pulls Jira, sets up Obsidian notes. |
 | **Planning (auto)** | `swt --branch` on fresh branch | Constrained mode + 0 commits → 3 SWEs plan the ticket from AC. |
-| **Review (auto)** | `swt --branch` on colleague's branch | Constrained mode + commits by others → 3 SWEs review the diff (security/logic/quality lenses). |
+| **Review (auto)** | `swt --branch` on colleague's branch | Constrained mode + commits by others → 3 SWEs review the diff (security/logic/quality lenses). Type `post <ordinals>` to share findings as Bitbucket PR comments (requires Bitbucket integration). |
 | **Review (manual)** | mid-session, user says "review the changes" or similar | Constrained or unconstrained — user verbally triggers Review Mode to analyze a branch diff. |
 | **Preview (manual)** | mid-session, user or TPM invokes | Dry-run code planning for a specific change. |
 | **Support** | `swt --support` | Dedicated multi-app support work. Reads `support.apps` from settings, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate across configured app repos. |
+| **Monitor** | `swt --branch --monitor` | Watches the PR for new comments (ticket auto-detected from branch name), classifies them, coordinates SWE responses, and posts replies after the user pushes. Requires Bitbucket integration. Runs until Ctrl+C. |

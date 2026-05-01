@@ -109,6 +109,7 @@ User runs: swt --branch
     → TPM aggregates into ## Implementation Plan section in Obsidian notes
     → User reviews plan, then work proceeds to discussion/code phase
   → Else if branch has commits by someone else: review mode auto-kicks (see Review Mode)
+    → After review findings are presented, user may type `post <ordinals>` to share selected findings as Bitbucket PR comments (requires Bitbucket integration; see Review Mode Posting)
   → Else: normal development flow (discuss → code → QA → etc.)
   → User and TPM discuss implementation approach
   → TPM spawns SWE subagents for code work / edge case hunting
@@ -137,6 +138,23 @@ User runs: swt --support
   → TPM treats that app's path as the active work repo
   → TPM dispatches SWEs to divide-and-conquer the investigation
   → User can pivot to a different app within the same session
+```
+
+### Monitor Mode (PR comment watch loop)
+```
+User runs: swt --branch --monitor   (ticket auto-detected from current git branch name)
+  → TPM resolves the open PR for the current branch via bb-curl.sh
+  → TPM snapshots existing comments as baseline (not processed)
+  → TPM polls Bitbucket every monitor.interval_seconds
+  → New comment → TPM classifies into one of six categories: nitpick | bug | style | architectural | security | question
+  → Category action=resolve → TPM deploys a SWE to apply the change
+     (escalates to risky_change if .NET-guarded files or threshold exceeded)
+  → Category action=ask → added to in-session todo list for user review
+  → User types "review" to see pending items, then "like N / revert N / skip N"
+  → User commits and pushes (manually), then says "posted"
+  → TPM writes counter-responses back to Bitbucket using counter_response_prompt
+  → All activity logged to Obsidian ticket notes under ## PR Comments
+  → Runs until Ctrl+C
 ```
 
 ---
@@ -168,7 +186,7 @@ When booting in constrained mode and the ticket notes already exist from a previ
 
 ## Settings File
 
-A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist, statusline display toggle, Bitbucket integration `enabled` and `flavor` — `workspace`, `email`, and `token` live in the secrets file at `${SWT_SECRETS_PATH}`) AND accumulated session data (feedback entries, support app map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The current schema is `_schema: 3` — `deploy.sh` migrates older versions automatically and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
+A unified `swt_settings.json` in the user's Windows home directory is the single source of truth for user-tunable config (core allocation, Atlassian, paths, Playwright, database allowlist, statusline display toggle, Bitbucket integration `enabled` and `flavor` — `workspace`, `email`, and `token` live in the secrets file at `${SWT_SECRETS_PATH}`) AND accumulated session data (feedback entries, support app map). `deploy.sh` resolves the path and exports it as `SWT_SETTINGS_PATH`. The current schema is `_schema: 5` — `deploy.sh` migrates older versions automatically and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting; the v3→v4 migration adds the `monitor` block with defaults; the v4→v5 migration adds the `review` block with defaults. The legacy `swt.yml` is kept as a deprecated seed template — it is read only on first boot when the JSON file doesn't exist yet. Backward-compat env vars (`SWT_FEEDBACK_PATH`, `SWT_SUPPORT_PATH`, `SWT_DB_ENABLED`, etc.) all resolve to or derive from this single file. See the Settings File section in `tpm-agent.md` for the schema and TPM's read/write rules.
 
 ## Feedback Log
 
@@ -177,6 +195,18 @@ A persistent, project-agnostic log of feature ideas the user accumulates across 
 ## Support Mode
 
 A session-modality dedicated to multi-app team support work, triggered by `swt --support`. Stored under the `support` key in `swt_settings.json` (`support.enabled`, `support.apps{}`). `deploy.sh` exports `SWT_SUPPORT_ENABLED`, `SWT_SUPPORT_PATH` (backward-compat alias for `SWT_SETTINGS_PATH`), and `SWT_SUPPORT_MODE`. The `support.apps` object maps supported apps (CMMS, HITS, TPS, MCP) to their local repo paths (or `null` when unmapped) — TPM reads it on every boot to know where each app lives. On `swt --support` boots, `deploy.sh` runs boot-time auto-discovery for any `null` entries — it scans curated roots first, then falls back to a depth-limited C-drive search, and writes any matches back to `swt_settings.json` (printing a `[swt] discovered <APP> at <path>` line per find). With `--support`, the entire session is scoped to support work and the user can pivot between apps within the session. Mutually exclusive with `--branch`. See the Support Mode section in `tpm-agent.md` for full behavior.
+
+## Monitor Mode
+
+A long-running session mode that watches a Bitbucket PR for incoming CodeRabbit and reviewer comments, categorizes them, and coordinates TPM's response so no comment falls through the cracks. Triggered by pairing `--monitor` with `--branch`: `swt --branch --monitor`. The ticket is auto-detected from the current git branch name (e.g., a branch named `CMMS-1234-fix-foo` resolves to ticket `CMMS-1234`). Requires Bitbucket integration (`deploy.sh --setup-bitbucket`) and is mutually exclusive with `--support`.
+
+On startup TPM resolves the open PR for the current branch, snapshots existing comments as a baseline (they are not processed), then polls Bitbucket every `monitor.interval_seconds`. Each new comment is classified into one of six categories: `nitpick`, `bug`, `style`, `architectural`, `security`, or `question`. Per-category policy (`action: resolve | ask`) determines whether TPM auto-escalates to a SWE or surfaces the comment for the user to decide. Changes touching .NET-guarded files or exceeding `monitor.risky_change_file_threshold` are automatically escalated to `risky_change` — this is an escalation bucket, not a classifier output. All pending actions accumulate in an in-session todo list; the user types `review` to see it and responds with `like <n>`, `revert <n>`, or `skip <n>`. After the user commits and pushes, saying `posted` triggers TPM to write counter-responses back to Bitbucket using the configured `monitor.counter_response_prompt`. Monitor runs until Ctrl+C.
+
+Settings live under the `monitor` key in `swt_settings.json`: `monitor.enabled`, `monitor.interval_seconds` (default 300), `monitor.risky_change_file_threshold` (default 5), `monitor.categories.{category}.{action,prompt}` for each of the six classifier categories (plus `risky_change` as an escalation bucket), and `monitor.counter_response_prompt` for guiding reply tone and content. All activity is logged to the Obsidian ticket notes under a `## PR Comments` section. See the Monitor Mode section in `tpm-agent.md` for full behavior.
+
+## Review Mode Posting
+
+Extends review mode with the ability to share selected findings directly as Bitbucket PR comments. After the 3-SWE security/logic/quality scan completes and findings are presented (each assigned a `Rating: N/5`), the user explicitly types `post <ordinals>` to select findings for posting — e.g., `post 1`, `post 1, 3`, `post 2-4`, `post all`, or `post all security`. TPM polishes each selected finding into a 1-2 sentence professional comment using `review.comment_posting_prompt`, then shows the polished comments for user approval (`ok` / `revise N: <change>` / `cancel`) before posting via `bb-curl.sh`. `min_rating_to_post` filters findings when `post all` is used — explicit ordinals always override the filter. Findings are auto-placed inline (if `file:line` is known) or in the PR overview otherwise. After posting, TPM annotates the Obsidian `## Branch Review` section with `[posted HH:MM — bitbucket-comment-id #<id>]` per finding. Settings live under the `review` key in `swt_settings.json`. Requires Bitbucket integration (`review.enabled` must be `true`). See the Review Mode Posting section in `tpm-agent.md` for full behavior.
 
 ## Pre-PR Checklist (CodeRabbit-Aware)
 
@@ -211,7 +241,7 @@ TPM can read screenshots from the user's Windows clipboard via `scripts/clipboar
 
 ## Bitbucket Integration
 
-Optional, opt-in Bitbucket Cloud REST integration for querying and posting to PR state, comments, and pipelines. Off by default — only active when the user has run `deploy.sh --setup-bitbucket`. User-specific account data — `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, and `BITBUCKET_WORKSPACE` — lives in `${SWT_SECRETS_PATH}` (chmod 600), never in the repo and never in `swt_settings.json`. The settings file holds only project-level config for the bitbucket block (`enabled`, `flavor`, `auth.token_source`); workspace moved to the secrets file because it's paired with the credentials, not project config. `deploy.sh` exports `SWT_BB_ENABLED` and `SWT_BB_FLAVOR` to TPM, but `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE` are NOT exported — only `scripts/bb-curl.sh` reads them via local sourcing of the secrets file at call time. Agents make read and write calls via `bb-curl` at user direction. Agents NEVER craft raw `Authorization` headers; the "NEVER read or echo secrets" hard rule covers this. See the Bitbucket Integration section in `tpm-agent.md` for the full schema, behavior matrix, and example invocations. User-facing reference: `docs/bitbucket-integration.md`.
+Optional, opt-in Bitbucket Cloud REST integration for querying and posting to PR state, comments, and pipelines. Off by default — only active when the user has run `deploy.sh --setup-bitbucket`. User-specific account data — `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, and `BITBUCKET_WORKSPACE` — lives in `${SWT_SECRETS_PATH}` (chmod 600), never in the repo and never in `swt_settings.json`. The settings file holds only project-level config for the bitbucket block (`enabled`, `flavor`, `auth.token_source`); workspace moved to the secrets file because it's paired with the credentials, not project config. `deploy.sh` exports `SWT_BB_ENABLED` and `SWT_BB_FLAVOR` to TPM, but `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE` are NOT exported — only `scripts/bb-curl.sh` reads them via local sourcing of the secrets file at call time. Agents make read and write calls via `bb-curl` at user direction — write calls occur in two places: monitor mode posts counter-responses back to Bitbucket after the user pushes, and review mode posting shares polished findings as PR comments after user approval. Agents NEVER craft raw `Authorization` headers; the "NEVER read or echo secrets" hard rule covers this. See the Bitbucket Integration section in `tpm-agent.md` for the full schema, behavior matrix, and example invocations. User-facing reference: `docs/bitbucket-integration.md`.
 
 ## Statusline Display
 
@@ -287,10 +317,11 @@ Per-ticket working notes. Sections:
 - `## Edge Cases` — discovered during development
 - `## Testing Procedures` — written collaboratively by TPM + user
 - `## QA Findings` — from QA review
-- `## Branch Review` — findings from review-mode SWEs (security/logic/quality)
+- `## Branch Review` — findings from review-mode SWEs (security/logic/quality), each with a `Rating: N/5`; posted findings annotated with `[posted HH:MM — bitbucket-comment-id #<id>]`
+- `## PR Comments` — running log of incoming comments, their classifications, and TPM's responses (monitor mode only)
 - `## Session Handoff (date)` — what's done, in progress, pending, decisions, blockers
 
-Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions.
+Not every section appears in every ticket — Implementation Plan only appears for planning-mode sessions; Branch Review only appears for review-mode sessions; PR Comments only appears for monitor-mode sessions.
 
 ---
 

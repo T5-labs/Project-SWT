@@ -6,6 +6,7 @@
 #   swt                      → unconstrained mode (general team, no ticket context)
 #   swt --branch             → constrained mode (auto-detect ticket from git branch)
 #   swt --support            → support mode (scoped to swt_settings.json apps)
+#   swt --branch --monitor   → monitor mode (watch the branch's PR for new comments)
 #
 # Install:
 #   See README.md for full setup. Quick version:
@@ -514,7 +515,7 @@ for raw in os.environ.get('SUPPORT_MD', '').splitlines():
         repos[app] = val
 
 doc = {
-    "_schema": 3,
+    "_schema": 5,
     "team": {
         "swe_count": _int(os.environ.get('SEED_SWE_COUNT'), 3),
         "swe_efficiency_cores": _int(os.environ.get('SEED_SWE_EFF'), 1),
@@ -557,6 +558,26 @@ doc = {
     "statusline": {
         "enabled": True,
     },
+    "monitor": {
+        "enabled": True,
+        "interval_seconds": 300,
+        "risky_change_file_threshold": 5,
+        "categories": {
+            "nitpick":       {"action": "resolve", "prompt": "Apply the suggestion verbatim if reasonable."},
+            "bug":           {"action": "ask",     "prompt": ""},
+            "style":         {"action": "resolve", "prompt": "Match the surrounding style; don't refactor beyond the comment."},
+            "architectural": {"action": "ask",     "prompt": ""},
+            "security":      {"action": "ask",     "prompt": ""},
+            "question":      {"action": "ask",     "prompt": ""},
+            "risky_change":  {"action": "ask",     "prompt": ""},
+        },
+        "counter_response_prompt": "Reply professionally and concisely. Acknowledge the comment, state what was done (or why we disagree), and keep it to 1-2 sentences. No double-dashes.",
+    },
+    "review": {
+        "enabled": True,
+        "comment_posting_prompt": "Polish the finding into a 1-2 sentence professional PR comment. State the issue clearly and suggest a fix when one is obvious. No double-dashes.",
+        "min_rating_to_post": 1,
+    },
 }
 
 out = os.environ['OUT_FILE']
@@ -577,14 +598,18 @@ PY
 
 _ensure_settings_file || true
 
-# ── Schema Migration (v1 → v2 → v3) ───────────────────────────────
+# ── Schema Migration (v1 → v2 → v3 → v4 → v5) ─────────────────────
 # v2 collapses support.{apps[], search_roots[], repos{}} into a single
 # support.apps{} map (APP → path|null) and bumps _schema to 2.
 # v3 adds the bitbucket block (enabled/flavor/auth) after support and bumps
 # _schema to 3. (Workspace lives in $SWT_SECRETS_PATH, not settings.json.)
+# v4 adds the monitor block (enabled/interval/categories/counter_response_prompt)
+# after statusline and bumps _schema to 4. Powers `swt --branch --monitor`.
+# v5 adds the review block (enabled/comment_posting_prompt/min_rating_to_post)
+# after monitor and bumps _schema to 5. Powers the review-mode `post` verb.
 # Runs in-place on an existing settings file; no-op if already at the latest
 # schema, if the file is missing, or if the JSON is malformed. A v1 file is
-# migrated through both steps in a single boot. Never fails the boot.
+# migrated through every step in a single boot. Never fails the boot.
 _migrate_settings_schema() {
     [ -n "$SWT_SETTINGS_PATH" ] && [ -f "$SWT_SETTINGS_PATH" ] || return 0
 
@@ -599,12 +624,12 @@ if not path:
 try:
     with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f, object_pairs_hook=OrderedDict)
-except Exception:
-    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
+except Exception as _e:
+    print('[swt] ⚠ swt_settings.json: schema unreadable ({}), skipping migration. To fix: ensure the file is valid JSON, or delete swt_settings.json to re-seed from defaults.'.format(repr(str(_e))))
     sys.exit(0)
 
 if not isinstance(data, (dict, OrderedDict)):
-    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
+    print('[swt] ⚠ swt_settings.json: schema unreadable (top-level is {}), skipping migration. To fix: ensure the file is a JSON object, or delete swt_settings.json to re-seed from defaults.'.format(type(data).__name__))
     sys.exit(0)
 
 
@@ -624,6 +649,31 @@ def _atomic_write(payload):
         except OSError:
             pass
         return False
+
+
+def _deep_merge_defaults(defaults, existing):
+    """Return an OrderedDict whose keys follow 'defaults' order.
+
+    For each key in defaults:
+    - If the key is missing from existing, use the default value.
+    - If both values are dicts, recurse.
+    - Otherwise, preserve the existing (user-supplied) value.
+    Keys that exist in existing but NOT in defaults are appended at the end
+    so we never silently discard user-added custom keys.
+    """
+    result = OrderedDict()
+    for k, default_val in defaults.items():
+        if k not in existing:
+            result[k] = default_val
+        elif isinstance(default_val, (dict, OrderedDict)) and isinstance(existing[k], (dict, OrderedDict)):
+            result[k] = _deep_merge_defaults(default_val, existing[k])
+        else:
+            result[k] = existing[k]
+    # Append any extra keys the user had that aren't in the defaults schema.
+    for k, v in existing.items():
+        if k not in result:
+            result[k] = v
+    return result
 
 
 migrated_any = False
@@ -676,8 +726,9 @@ if schema == 1 and v1_shape:
     schema = data.get('_schema')
 
 # ── v2 → v3 ──────────────────────────────────────────────────────
-# Detect v2: _schema == 2 OR (schema unset/legacy AND bitbucket block missing).
-needs_v3 = (schema == 2) and ('bitbucket' not in data)
+# Detect v2: _schema == 2. Always run if at v2 so a pre-seeded partial
+# 'bitbucket' block is deep-merged with defaults rather than silently skipped.
+needs_v3 = (schema == 2)
 
 if needs_v3:
     # Backup the v2 file before mutating (only if no backup exists yet).
@@ -688,17 +739,26 @@ if needs_v3:
         except Exception as e:
             print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
 
-    bitbucket_block = OrderedDict()
-    bitbucket_block['enabled'] = False
-    bitbucket_block['flavor'] = 'cloud'
-    auth_block = OrderedDict()
-    auth_block['token_source'] = 'env:BITBUCKET_TOKEN'
-    bitbucket_block['auth'] = auth_block
+    bitbucket_defaults = OrderedDict()
+    bitbucket_defaults['enabled'] = False
+    bitbucket_defaults['flavor'] = 'cloud'
+    auth_defaults = OrderedDict()
+    auth_defaults['token_source'] = 'env:BITBUCKET_TOKEN'
+    bitbucket_defaults['auth'] = auth_defaults
 
-    # Insert bitbucket block immediately after 'support' to preserve key order.
+    # Deep-merge defaults onto any pre-existing user 'bitbucket' values so
+    # a partially pre-seeded block gets its missing keys filled in.
+    existing_bb = data.get('bitbucket', OrderedDict())
+    bitbucket_block = _deep_merge_defaults(bitbucket_defaults, existing_bb)
+
+    # Insert (or replace) bitbucket block immediately after 'support' to
+    # preserve canonical key order.
     new_data = OrderedDict()
     inserted = False
     for k, v in data.items():
+        if k == 'bitbucket':
+            # Skip the old entry — we'll re-insert the merged block below.
+            continue
         new_data[k] = v
         if k == 'support' and not inserted:
             new_data['bitbucket'] = bitbucket_block
@@ -737,11 +797,140 @@ if needs_v3:
     migrated_any = True
     schema = data.get('_schema')
 
+# ── v3 → v4 ──────────────────────────────────────────────────────
+# Detect v3: _schema == 3. Always run if at v3 so a pre-seeded partial
+# 'monitor' block is deep-merged with defaults rather than silently skipped.
+needs_v4 = (schema == 3)
+
+if needs_v4:
+    # Backup the v3 file before mutating (only if no backup exists yet).
+    backup_path_v3 = path + '.v3.bak'
+    if not os.path.exists(backup_path_v3):
+        try:
+            shutil.copy2(path, backup_path_v3)
+        except Exception as e:
+            print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
+
+    categories_defaults = OrderedDict()
+    for _name, _action, _prompt in (
+        ('nitpick',       'resolve', 'Apply the suggestion verbatim if reasonable.'),
+        ('bug',           'ask',     ''),
+        ('style',         'resolve', "Match the surrounding style; don't refactor beyond the comment."),
+        ('architectural', 'ask',     ''),
+        ('security',      'ask',     ''),
+        ('question',      'ask',     ''),
+        ('risky_change',  'ask',     ''),
+    ):
+        cat = OrderedDict()
+        cat['action'] = _action
+        cat['prompt'] = _prompt
+        categories_defaults[_name] = cat
+
+    monitor_defaults = OrderedDict()
+    monitor_defaults['enabled'] = True
+    monitor_defaults['interval_seconds'] = 300
+    monitor_defaults['risky_change_file_threshold'] = 5
+    monitor_defaults['categories'] = categories_defaults
+    monitor_defaults['counter_response_prompt'] = (
+        'Reply professionally and concisely. Acknowledge the comment, '
+        'state what was done (or why we disagree), and keep it to 1-2 sentences. '
+        'No double-dashes.'
+    )
+
+    # Deep-merge defaults onto any pre-existing user 'monitor' values so
+    # a partially pre-seeded block gets its missing keys filled in.
+    existing_monitor = data.get('monitor', OrderedDict())
+    monitor_block = _deep_merge_defaults(monitor_defaults, existing_monitor)
+
+    # Insert (or replace) monitor block immediately after 'statusline' to
+    # preserve canonical key order.
+    new_data = OrderedDict()
+    inserted = False
+    for k, v in data.items():
+        if k == 'monitor':
+            # Skip the old entry — we'll re-insert the merged block below.
+            continue
+        new_data[k] = v
+        if k == 'statusline' and not inserted:
+            new_data['monitor'] = monitor_block
+            inserted = True
+    if not inserted:
+        # Defensive: if 'statusline' wasn't present, append at the end.
+        new_data['monitor'] = monitor_block
+
+    new_data['_schema'] = 4
+    data = new_data
+
+    if not _atomic_write(data):
+        print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
+        sys.exit(0)
+
+    print(f"[swt] migrated swt_settings.json schema 3 → 4 (backup: {backup_path_v3})")
+    migrated_any = True
+    schema = data.get('_schema')
+
+# ── v4 → v5 ──────────────────────────────────────────────────────
+# Detect v4: _schema == 4. Always run if at v4 so a pre-seeded partial
+# 'review' block is deep-merged with defaults rather than silently skipped.
+needs_v5 = (schema == 4)
+
+if needs_v5:
+    # Backup the v4 file before mutating (only if no backup exists yet).
+    backup_path_v4 = path + '.v4.bak'
+    if not os.path.exists(backup_path_v4):
+        try:
+            shutil.copy2(path, backup_path_v4)
+        except Exception as e:
+            print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
+
+    review_defaults = OrderedDict()
+    review_defaults['enabled'] = True
+    review_defaults['comment_posting_prompt'] = (
+        'Polish the finding into a 1-2 sentence professional PR comment. '
+        'State the issue clearly and suggest a fix when one is obvious. '
+        'No double-dashes.'
+    )
+    review_defaults['min_rating_to_post'] = 1
+
+    # Deep-merge defaults onto any pre-existing user 'review' values so
+    # a partially pre-seeded block gets its missing keys filled in.
+    existing_review = data.get('review', OrderedDict())
+    review_block = _deep_merge_defaults(review_defaults, existing_review)
+
+    # Insert (or replace) review block immediately after 'monitor' to
+    # preserve canonical key order.
+    new_data = OrderedDict()
+    inserted = False
+    for k, v in data.items():
+        if k == 'review':
+            # Skip the old entry — we'll re-insert the merged block below.
+            continue
+        new_data[k] = v
+        if k == 'monitor' and not inserted:
+            new_data['review'] = review_block
+            inserted = True
+    if not inserted:
+        # Defensive: if 'monitor' wasn't present, append at the end.
+        new_data['review'] = review_block
+
+    new_data['_schema'] = 5
+    data = new_data
+
+    if not _atomic_write(data):
+        print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
+        sys.exit(0)
+
+    print(f"[swt] migrated swt_settings.json schema 4 → 5 (backup: {backup_path_v4})")
+    migrated_any = True
+    schema = data.get('_schema')
+
 if migrated_any:
     print('__SWT_SCHEMA_MIGRATED__')
 elif schema is None or not isinstance(schema, int):
-    print('[swt] ⚠ swt_settings.json: schema unreadable, skipping migration')
-# else: schema >= 3 → silent no-op
+    print('[swt] ⚠ swt_settings.json: schema unreadable ({}), skipping migration. To fix: edit _schema to a number, or delete swt_settings.json to re-seed from defaults.'.format(repr(schema)))
+elif schema > 5:
+    print('[swt] ⚠ swt_settings.json: schema {} is newer than supported 5 — running anyway, but some features may not work.'.format(schema))
+# else: schema == 5 → silent no-op
 PY
 }
 
@@ -848,9 +1037,22 @@ MODE="unconstrained"
 REMOTE=false
 MODE_SUPPORT=false
 MODE_BRANCH=false
+MODE_MONITOR=false
 # Engine = the Claude Code-compatible binary swt will exec. Not read from env
 # (no env override per design) — only the --engine flag overrides this default.
 SWT_ENGINE="claude"
+
+# Pre-pass: detect run flags (--monitor, --branch, --support) so setup handlers
+# can warn when they're combined with a setup-only flag that ignores them.
+_PREPASS_HAS_RUN_FLAGS=false
+_PREPASS_RUN_FLAGS_LIST=""
+for arg in "$@"; do
+    case "$arg" in
+        --monitor) _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --monitor" ;;
+        --branch)  _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --branch" ;;
+        --support) _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --support" ;;
+    esac
+done
 
 # Pre-pass: extract --engine value before the main loop so it's available for
 # validation/diagnostics regardless of position. Supports --engine=<value> and
@@ -884,6 +1086,10 @@ for arg in "$@"; do
             echo "  swt                    Unconstrained mode (general team, no ticket context)"
             echo "  swt --branch           Constrained mode (auto-detect ticket from git branch)"
             echo "  swt --support          Support mode (scoped to apps in swt_settings.json)"
+            echo "  swt --branch --monitor Monitor mode — watch the branch's PR for new comments"
+            echo "                         and categorize / auto-resolve / surface them per policy."
+            echo "                         Requires --branch and Bitbucket integration. Mutually"
+            echo "                         exclusive with --support."
             echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo "  swt --engine=<binary>  Claude Code-compatible engine to launch (default: claude)."
             echo "                         Examples: --engine=claude-rc, --engine=/path/to/custom-build."
@@ -895,6 +1101,9 @@ for arg in "$@"; do
             exit 0
             ;;
         --setup)
+            if [ "$_PREPASS_HAS_RUN_FLAGS" = true ]; then
+                echo "[swt] ⚠ ignoring run flags (${_PREPASS_RUN_FLAGS_LIST# }) since --setup runs in setup-only mode" >&2
+            fi
             echo "[swt] Running setup..."
             LAUNCHER_DIR="$HOME/bin"
             LAUNCHER_PATH="$LAUNCHER_DIR/swt"
@@ -967,6 +1176,9 @@ EOF
             exit 0
             ;;
         --setup-bitbucket)
+            if [ "$_PREPASS_HAS_RUN_FLAGS" = true ]; then
+                echo "[swt] ⚠ ignoring run flags (${_PREPASS_RUN_FLAGS_LIST# }) since --setup-bitbucket runs in setup-only mode" >&2
+            fi
             # Interactive Bitbucket setup — prompts for workspace + flavor, writes
             # `flavor` and `enabled` to swt_settings.json (atomic), and ensures
             # $SWT_SECRETS_PATH exists with lines for BITBUCKET_EMAIL,
@@ -1154,6 +1366,9 @@ SECRETS_EOF
         --support)
             MODE_SUPPORT=true
             ;;
+        --monitor)
+            MODE_MONITOR=true
+            ;;
         --engine=*)
             # Already captured in the pre-pass — no-op here so it isn't flagged
             # as unknown.
@@ -1252,6 +1467,39 @@ if [ "$MODE_SUPPORT" = true ] && [ "$MODE_BRANCH" = true ]; then
     exit 2
 fi
 
+# --monitor is a refinement of --branch (it watches the branch's PR), so the
+# pairing is required. It also implies a ticket-scoped session, which support
+# mode does not, so the two modalities are mutually exclusive.
+if [ "$MODE_MONITOR" = true ] && [ "$MODE_SUPPORT" = true ]; then
+    echo "[swt] --monitor and --support are mutually exclusive" >&2
+    exit 2
+fi
+
+if [ "$MODE_MONITOR" = true ] && [ "$MODE_BRANCH" != true ]; then
+    echo "[swt] --monitor requires --branch (e.g., swt --branch --monitor)" >&2
+    exit 2
+fi
+
+# Monitor mode posts to and reads from a Bitbucket PR — the integration must be
+# wired up (via --setup-bitbucket) before the user can start a monitor session.
+if [ "$MODE_MONITOR" = true ] && [ "${SWT_BB_ENABLED:-false}" != "true" ]; then
+    echo "[swt] swt --monitor requires Bitbucket integration. Run: ./deploy.sh --setup-bitbucket" >&2
+    exit 2
+fi
+
+# Fail fast if the user has disabled monitor in settings — avoids booting a full
+# session only for TPM to refuse later. Treat missing key as enabled so the
+# migration block (which adds the key) can run first on schema-2/3 files.
+if [ "$MODE_MONITOR" = true ]; then
+    _MONITOR_ENABLED_CHECK="$(_json_get "${SWT_SETTINGS_PATH}" monitor.enabled)"
+    case "$(echo "$_MONITOR_ENABLED_CHECK" | tr '[:upper:]' '[:lower:]')" in
+      false|0|no|off|disabled)
+        echo "[swt] swt --monitor is disabled in settings. Set \"monitor.enabled\": true in ${SWT_SETTINGS_PATH} to enable." >&2
+        exit 2
+        ;;
+    esac
+fi
+
 if [ "$MODE_BRANCH" = true ]; then
     # Auto-detect ticket from current git branch name
     # Strip optional prefix (bugfix/, feature/, hotfix/, etc.) before matching
@@ -1348,6 +1596,15 @@ if [ "$MODE_SUPPORT" = true ]; then
     export SWT_SUPPORT_MODE="true"
 else
     export SWT_SUPPORT_MODE="false"
+fi
+
+# Export monitor mode flag — true only when --monitor was passed this boot.
+# TPM reads the rest of the monitor config (interval, categories, prompts)
+# directly from swt_settings.json — only the mode flag is exported.
+if [ "$MODE_MONITOR" = true ]; then
+    export SWT_MONITOR_MODE="true"
+else
+    export SWT_MONITOR_MODE="false"
 fi
 
 # Incremental discovery: for any app whose repo path is null in support.apps,
@@ -1536,6 +1793,45 @@ else
     INFO_SUPPORT="Support: Disabled"
 fi
 
+# Monitor panel line: surfaces monitor mode when --monitor was passed, plus the
+# settings-level enabled flag and configured poll interval. When the mode isn't
+# active this boot, only the settings-level state is shown ("Enabled" / "Disabled").
+_MONITOR_SETTING_ENABLED="$(_json_get "$SWT_SETTINGS_PATH" monitor.enabled)"
+_MONITOR_INTERVAL="$(_json_get "$SWT_SETTINGS_PATH" monitor.interval_seconds)"
+_MONITOR_INTERVAL="${_MONITOR_INTERVAL:-300}"
+if ! [[ "$_MONITOR_INTERVAL" =~ ^[0-9]+$ ]] || [ "$_MONITOR_INTERVAL" -lt 1 ]; then
+    echo "[swt] ⚠ monitor.interval_seconds is invalid ('$_MONITOR_INTERVAL'); using default 300." >&2
+    _MONITOR_INTERVAL=300
+fi
+if [ "$SWT_MONITOR_MODE" = "true" ]; then
+    INFO_MONITOR="Monitor: ON (mode active, every ${_MONITOR_INTERVAL}s)"
+else
+    case "$(echo "${_MONITOR_SETTING_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+      false|0|no|off|disabled)
+        INFO_MONITOR="Monitor: Disabled" ;;
+      *)
+        INFO_MONITOR="Monitor: Enabled (every ${_MONITOR_INTERVAL}s)" ;;
+    esac
+fi
+
+# Review panel line: surfaces whether review-mode comment posting is enabled
+# and the configured min_rating_to_post threshold. Review mode itself is
+# auto-detected post-boot inside TPM (no --review flag), so there's no
+# tri-state — just Enabled (with rating) or Disabled.
+_REVIEW_SETTING_ENABLED="$(_json_get "$SWT_SETTINGS_PATH" review.enabled)"
+_REVIEW_MIN_RATING="$(_json_get "$SWT_SETTINGS_PATH" review.min_rating_to_post)"
+_REVIEW_MIN_RATING="${_REVIEW_MIN_RATING:-1}"
+if ! [[ "$_REVIEW_MIN_RATING" =~ ^[0-9]+$ ]] || [ "$_REVIEW_MIN_RATING" -lt 1 ] || [ "$_REVIEW_MIN_RATING" -gt 5 ]; then
+    echo "[swt] ⚠ review.min_rating_to_post is invalid ('$_REVIEW_MIN_RATING'); using default 1." >&2
+    _REVIEW_MIN_RATING=1
+fi
+case "$(echo "${_REVIEW_SETTING_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+  false|0|no|off|disabled)
+    INFO_REVIEW="Review: Disabled" ;;
+  *)
+    INFO_REVIEW="Review: Enabled (min rating ${_REVIEW_MIN_RATING}/5 to post)" ;;
+esac
+
 # Bitbucket panel line: three states — Enabled (with workspace), Disabled, or
 # Enabled-but-token-missing (when bitbucket.enabled is true in settings but
 # _resolve_bitbucket_secrets downgraded SWT_BB_ENABLED to false). Workspace
@@ -1596,6 +1892,8 @@ swt_line "$INFO_DB"
 swt_line "$INFO_FEEDBACK"
 swt_line "$INFO_SUPPORT"
 swt_line "$INFO_BITBUCKET"
+swt_line "$INFO_MONITOR"
+swt_line "$INFO_REVIEW"
 if [ -n "$INFO_BOARD" ]; then
     swt_line "$INFO_BOARD"
 fi
@@ -1611,6 +1909,12 @@ elif [ "${_BB_SETTING_ENABLED:-false}" = "true" ]; then
     echo "[swt] ✗ Bitbucket: enabled but token missing"
 else
     echo "[swt] ✓ Bitbucket: disabled"
+fi
+
+# Monitor-mode confirmation — only printed when --monitor was passed this boot
+# (a settings-level enabled/disabled toggle is already surfaced in the box).
+if [ "$SWT_MONITOR_MODE" = "true" ]; then
+    echo "[swt] ✓ Monitor mode: active (polling every ${_MONITOR_INTERVAL}s)"
 fi
 
 # Surface the engine selection only when it differs from the default — keeps

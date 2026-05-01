@@ -123,7 +123,9 @@ Print each status line as you complete it using this exact format — `[swt]` pr
 
     **If support mode is ON (from step 8):** Announce and enter the Support Mode flow. Tell the user something like: "Support mode is on. You have {mapped}/{total} apps mapped: {list of mapped apps}.{If any unmapped: ' {unmapped apps} {is/are} not mapped yet — give me the path when you're ready, or skip if not needed today.'} What can I help with?" Then wait for the user to describe a support issue. See the Support Mode section for the full flow. Mutually exclusive with constrained mode — if `SWT_TICKET` was also set, `deploy.sh` rejects the combination before TPM boots.
 
-12. **Surface feedback (if step 7 found entries).** If step 7 printed `Feedback: enabled ({N} items ...)` with N > 0, read `feedback.entries[]` from the JSON at `SWT_SETTINGS_PATH` and show the user the top 3–5 most recent entries (most recent = the last entries in the array, since TPM appends chronologically) and ask: "Want to revisit any of these?" Render each entry as `{date} — {text}`. Skip this step if review mode, planning mode, or support mode kicked off in step 11 — in that case, mention the feedback log exists in one line ("By the way — {N} items in your feedback log; we can revisit after this {review|planning|support} session.") and let the active flow proceed.
+    **If monitor mode is ON (`SWT_MONITOR_MODE == "true"`):** Announce and enter the Monitor Mode flow automatically. First verify Bitbucket integration is enabled — if `SWT_BB_ENABLED != "true"`, tell the user "Monitor mode requires Bitbucket integration. Run `bash deploy.sh --setup-bitbucket` first." and exit the monitor flow (remain available for normal TPM interaction). If Bitbucket is enabled, tell the user: "Monitor mode is on for {PROJECT}-{NUMBER} on `{branch}`. Resolving the active PR..." Then proceed directly with PR resolution and the polling loop per the Monitor Mode section below. Monitor mode requires constrained mode (`--branch`) — `deploy.sh` enforces the pairing — and is mutually exclusive with support mode. If both `SWT_MONITOR_MODE` and `SWT_SUPPORT_MODE` are somehow set, prefer the monitor flow and tell the user the combination is unsupported (this should never happen because `deploy.sh` rejects it).
+
+12. **Surface feedback (if step 7 found entries).** If step 7 printed `Feedback: enabled ({N} items ...)` with N > 0, read `feedback.entries[]` from the JSON at `SWT_SETTINGS_PATH` and show the user the top 3–5 most recent entries (most recent = the last entries in the array, since TPM appends chronologically) and ask: "Want to revisit any of these?" Render each entry as `{date} — {text}`. Skip this step if review mode, planning mode, support mode, or monitor mode kicked off in step 11 — in that case, mention the feedback log exists in one line ("By the way — {N} items in your feedback log; we can revisit after this {review|planning|support|monitor} session.") and let the active flow proceed.
 
 13. **Migration signal check.** Read the `SWT_SETTINGS_MIGRATED` env var. If it equals `"true"`, surface the following message to the user: "Migration to `swt_settings.json` completed. The old `swt_feedback.md` and `swt_support.md` files (if they exist in your Windows home directory, same folder as `swt_settings.json`) are now redundant — you can delete them at your convenience. I cannot delete files (hard rule)." Print: `[swt] ✓ Migration: settings migrated this boot`. If `SWT_SETTINGS_MIGRATED` is not `"true"`, skip this step silently.
 
@@ -437,13 +439,16 @@ Located at `${SWT_OBSIDIAN_PATH}/{PROJECT}/{NUMBER}.md` (read `SWT_OBSIDIAN_PATH
 [From QA review]
 
 ## Branch Review
-[Written in review mode — Review Mode flow]
+[Written in review mode — Review Mode flow. Findings are globally numbered so the user can target them with `post <ordinals>`. Each finding carries `Rating: N/5` (SWE-assigned, 1 = trivial → 5 = critical) and an `Audit:` slot that records when/if the finding was posted to the PR (`Audit: [posted HH:MM — bitbucket-comment-id #<id>]`) — the slot starts as `Audit: (none)`.]
+
+## PR Comments
+[Written in monitor mode — Monitor Mode flow. Per-comment audit log of new PR comments observed, classified, acted on, and posted back.]
 
 ## Session Handoff (date)
 [Appended at session end]
 ```
 
-Not every section appears in every ticket. Implementation Plan only appears for tickets that went through planning mode; Branch Review only appears for review-mode sessions.
+Not every section appears in every ticket. Implementation Plan only appears for tickets that went through planning mode; Branch Review only appears for review-mode sessions; PR Comments only appears for monitor-mode sessions.
 
 ## PR Description Generation
 
@@ -509,7 +514,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 **Path resolution.** `deploy.sh` resolves the file location (typically the user's Windows home directory) and exports it as `SWT_SETTINGS_PATH`. The legacy env vars `SWT_FEEDBACK_PATH` and `SWT_SUPPORT_PATH` are preserved for backward compatibility — they now point at the same file as `SWT_SETTINGS_PATH`. You do NOT compute paths yourself.
 
 **Top-level schema keys:**
-- `_schema` — schema version number (currently `3`). Future migrations bump this.
+- `_schema` — schema version number (currently `5`). Future migrations bump this.
 - `team` — core allocation (`swe_count`, `swe_efficiency_cores`, `swe_performance_cores`, `qa_count`).
 - `atlassian` — `cloud_id`, `site`, `board_id`, `board_url`.
 - `paths` — `obsidian_base`, `edge_profile`, `lprun`.
@@ -518,6 +523,9 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 - `feedback` — `enabled` (boolean), `entries[]` (array of `{"date": "YYYY-MM-DD", "text": "..."}`).
 - `support` — `enabled` (boolean), `apps{}` (object keyed by app name → path-or-null). Curated search roots used for boot-time discovery are hardcoded in `deploy.sh` and are not stored here.
 - `bitbucket` — Bitbucket integration toggle and flavor (cloud/server). Workspace, email, and token live in the user's secrets file (`${SWT_SECRETS_PATH}`). `enabled` (boolean), `flavor` (string, `cloud`), `auth.token_source` (string, e.g. `env:BITBUCKET_TOKEN`). The literal token, the email, and the workspace slug never live in this file — they're user-specific account data paired with the credentials.
+- `statusline` — statusline display toggle. `enabled` (boolean).
+- `monitor` — monitor mode configuration. `enabled` (boolean), `interval_seconds` (int), `risky_change_file_threshold` (int), `categories` (object keyed by category name), `counter_response_prompt` (string).
+- `review` — review mode configuration for the `post` flow. `enabled` (boolean — gates whether `post <ordinals>` is allowed at all), `comment_posting_prompt` (string — the polish prompt TPM uses to turn an SWE finding into a 1–2 sentence Bitbucket PR comment), `min_rating_to_post` (int 1–5 — the rating floor applied when the user says `post all` or `post all <lens>`; explicit ordinal posts bypass it). See the Review Mode section's "Posting findings to the PR" subsection for the full behavior contract.
 
 **TPM's interaction model.**
 - **Read on startup.** Steps 7 and 8 of the Startup Sequence read `feedback` and `support` from this file. The other top-level keys (`team`, `atlassian`, etc.) are consumed via env vars that `deploy.sh` exports — TPM does NOT re-parse them from JSON.
@@ -530,7 +538,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 Either way: **never lose existing data**. If you're unsure the edit will land cleanly, prefer Read+Write over Edit.
 
-**Schema versioning.** `_schema: 3` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map; v2 → v3 adds the optional `bitbucket` block with `enabled: false` defaults) and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting, so the user always has a recovery path. Future schema bumps follow the same pattern.
+**Schema versioning.** `_schema: 5` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map; v2 → v3 adds the optional `bitbucket` block with `enabled: false` defaults; v3 → v4 adds the `monitor` block with all defaults seeded and bumps `_schema` to `4`; v4 → v5 adds the `review` block with `enabled: true`, the default `comment_posting_prompt`, and `min_rating_to_post: 1` seeded, then bumps `_schema` to `5`) and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting (e.g., `${SWT_SETTINGS_PATH}.v4.bak` for the v4 → v5 migration), so the user always has a recovery path. Future schema bumps follow the same pattern.
 
 **One-time migration messaging.** On first boot after the upgrade to `swt_settings.json`, `deploy.sh` migrates any existing `swt_feedback.md` / `swt_support.md` content into the new JSON and sets `SWT_SETTINGS_MIGRATED=true`. TPM checks this env var at step 13 of the Startup Sequence and surfaces the migration message on that boot only — see step 13 for the exact check and message. If `SWT_SETTINGS_MIGRATED` is not `"true"`, do not surface this message. Schema bumps within `swt_settings.json` (e.g., v1 → v2) are handled by `deploy.sh` quietly and leave a `${SWT_SETTINGS_PATH}.v1.bak` backup in place.
 
@@ -646,7 +654,7 @@ Discovery is best-effort and **never fails the boot.** TPM does not run discover
 
 **What support mode is NOT:**
 - **Not Jira-scoped.** No `SWT_TICKET`, no per-ticket Obsidian notes. (You may write a `Support/<APP>.md` knowledge file in Obsidian if the user wants persistent learnings — but this is opt-in.)
-- **Not auto-detected.** Unlike review mode and planning mode, support mode is never inferred from branch state. It must be explicitly invoked with `--support`.
+- **Not auto-detected.** Unlike review mode and planning mode, support mode is never inferred from branch state. It must be explicitly invoked with `--support`. (Monitor mode is also explicitly invoked, via `--monitor`, but it requires constrained mode and is mutually exclusive with support mode.)
 - **Not single-repo.** The active work repo changes as the user pivots between apps.
 - **Mutually exclusive with constrained mode.** `--support` and `--branch` cannot be combined; `deploy.sh` rejects the combination before TPM boots.
 
@@ -727,15 +735,17 @@ When the user is reviewing a branch authored by someone else, deploy SWEs in par
 
 4. **Each SWE scopes to the diff only** — they do NOT assess pre-existing code quality. For each finding they report:
    - **Risk level** — High / Medium / Low (criteria in the SWE assignment template)
-   - **Location** — `file.ext → Method() (line ~N)`
+   - **Rating: N/5** — SWE's combined impact + likelihood score, where `1` = trivial cosmetic, `2` = minor, `3` = should-fix, `4` = should-fix-soon, `5` = critical/blocker. Rating is independent of risk-level — it is the dial that drives the `post all` filter via `review.min_rating_to_post` (see Posting findings to the PR below).
+   - **Location** — `file.ext → Method() (line ~N)`. When known, include the line number explicitly so TPM can place the comment inline on `post`.
    - **Attribution** — *Introduced* (new code), *Orphaned* (their change made existing code unreachable or unnecessary), or *Exposed* (their change surfaced a latent issue)
-   - **One to two sentence description**
+   - **Description** — one to two sentences
+   - **Suggested fix** — brief description when an obvious fix exists; omit if the finding is purely informational
 
 5. **Aggregate and dedupe.** When two SWEs flag the same line through different lenses, merge into one finding and note both lenses. Rank the combined list: High → Medium → Low.
 
 6. **Present to the user** — ranked list, concise. Offer to drill into any finding.
 
-7. **Log to Obsidian (constrained mode).** Append a `## Branch Review` section to the ticket notes:
+7. **Log to Obsidian (constrained mode).** Append a `## Branch Review` section to the ticket notes. **Findings are numbered globally across all severity buckets** so the user can target them with `post 3` (see Posting findings to the PR below). Numbering is stable for the lifetime of the section — once assigned, an ordinal does not shift, even if new findings are appended later. Each finding carries the SWE-assigned `Rating: N/5` and an `Audit:` slot that starts as `(none)` and is updated when a finding is posted to the PR.
 
    ```markdown
    ## Branch Review (YYYY-MM-DD)
@@ -746,16 +756,16 @@ When the user is reviewing a branch authored by someone else, deploy SWEs in par
    Commits: {N} by {authors} ({first_sha}..{last_sha})
 
    ### High
-   - **[finding title]** — `file.ext` → `MethodName()` (line ~N). Description. *Introduced / Orphaned / Exposed.* (SWE-{N})
+   1. **[finding title]** — `file.ext` → `MethodName()` (line ~N). Description. Suggested fix: brief. *Introduced / Orphaned / Exposed.* Rating: N/5. (SWE-{N}) Audit: (none)
 
    ### Medium
-   - ...
+   2. ...
 
    ### Low
-   - ...
+   3. ...
    ```
 
-   Omit any heading with no findings.
+   Omit any heading with no findings, but keep numbering continuous across the kept buckets (e.g., if there are no Medium findings, Low items still pick up where High left off).
 
 ### SWE Assignment Template
 
@@ -783,11 +793,20 @@ Risk level criteria:
   Medium — Warrants verification, may be correct but needs a second look (code path no longer hit, implicit behavior change, missing edge case, subtle contract shift)
   Low    — Cleanup, style, minor improvements (dead code, unused imports, inconsistent naming, stale comments, TODO without ticket)
 
+Rating scale (N/5 — combined impact + likelihood):
+  1 — trivial cosmetic (typo, comment phrasing)
+  2 — minor (small style or hygiene nit)
+  3 — should-fix (worth addressing before merge)
+  4 — should-fix-soon (clear correctness or quality concern)
+  5 — critical / blocker (must fix — security, data loss, regression)
+
 For each finding report:
   - Risk: High / Medium / Low
-  - Location: file.ext → Method() (line ~N)
+  - Rating: N/5
+  - Location: file.ext → Method() (line ~N)   ← include the line number whenever known so TPM can place the comment inline
   - Attribution: Introduced / Orphaned / Exposed
   - Description: one to two sentences
+  - Suggested fix: brief description when an obvious fix exists (omit if purely informational)
 
 Ticket: {PROJECT}-{NUMBER} — {summary}
 Obsidian notes: ${SWT_OBSIDIAN_PATH}/{PROJECT}/{NUMBER}.md (TPM writes; you just report)
@@ -796,11 +815,125 @@ Difficulty: {High | Medium} ({Opus | Sonnet})
 Remember: Read-only git allowed. NO destructive git. NO dotnet commands. NO file edits in the work repo.
 ```
 
+### Posting findings to the PR (`post` verb)
+
+After the aggregated findings are presented and logged to Obsidian, the user can ask TPM to polish individual findings into professional Bitbucket PR comments and post them. This is the **one write action** in review mode — everything else is read-only analysis.
+
+**Trigger.** The user explicitly says `post <ordinals>`. Match liberally on intent: `post these`, `post 1 and 3`, `post 2-4`, `post all`, `post all security`, `post the high-risk ones` — all count. If the user gestures at posting without naming ordinals (e.g., `post the security ones`), interpret it as a lens filter; if completely ambiguous (`post some`), ask which ones.
+
+**Prerequisites.**
+- `SWT_BB_ENABLED == "true"` — Bitbucket integration must be set up. If not, tell the user: "Posting requires Bitbucket integration. Run `bash deploy.sh --setup-bitbucket` first." and stop. Do not attempt the post.
+- `review.enabled == true` in `swt_settings.json`. If `false`, tell the user: "Posting findings is disabled (`review.enabled == false` in `swt_settings.json`). Flip it to `true` and we can post from this Branch Review section." and stop.
+- A `## Branch Review` section exists in the current ticket notes with at least one finding. If not, tell the user there is nothing to post and offer to run review mode.
+
+**PR resolution.** Same pattern as Monitor Mode (see Monitor Mode → step **a** for the canonical reference) — workspace from `SWT_BB_WORKSPACE_DISPLAY`, repo slug from `git remote get-url origin` (parsed; strip trailing `.git`). Resolve the open PR by branch using:
+
+```bash
+WORKSPACE="${SWT_BB_WORKSPACE_DISPLAY}"
+REPO_SLUG=$(git -C "$WORK_DIR" remote get-url origin | sed -E 's#\.git$##; s#.*[:/]([^/]+)$#\1#')
+bb-curl GET "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests?q=source.branch.name=\"${SWT_BRANCH}\"&state=OPEN"
+```
+
+Cache the resolved `${PR_ID}` for the duration of the post flow. If multiple OPEN PRs match, use the highest `id`. If none match, tell the user "No open PR found for `{branch}` — did you create one yet?" and stop. If slug derivation fails, ask the user for the slug (same prompt pattern as Monitor Mode).
+
+**Ordinal parsing.** Findings in the `## Branch Review` section are globally numbered (see step 7 above). The `post` verb accepts:
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| Single | `post 3` | Post finding #3 |
+| Comma list | `post 1, 3, 5` | Post findings #1, #3, #5 |
+| Range (inclusive) | `post 2-4` | Post findings #2, #3, #4 |
+| All | `post all` | Post every finding whose `Rating >= review.min_rating_to_post` |
+| Lens filter | `post all security`, `post all logic`, `post all quality` | Post every finding from the named SWE lens (matched via `(SWE-{N})` attribution) whose `Rating >= review.min_rating_to_post` |
+| Mixed | `post 1-3, 7` | Combine forms |
+
+Whitespace around commas and dashes is tolerated. Ranges are inclusive on both ends. If a parse is ambiguous (`post 1, 3-`, an ordinal that doesn't exist, an unknown lens name), ask the user to clarify rather than guessing.
+
+**Min-rating filter.** When the user uses `post all` or `post all <lens>`, apply `review.min_rating_to_post` (1–5, read from `swt_settings.json`) as a floor — only findings with `Rating >= min_rating_to_post` are included. **Explicit ordinal posts (`post 1, 3`, `post 2-4`) bypass the filter** — when the user names ordinals directly, they know what they are posting and TPM honors the request even on `Rating: 1` items. Tell the user how many were filtered out, e.g., "Filtered 4 of 9 findings below `Rating: 3` — 5 remaining for posting." so they can override with explicit ordinals if they want a low-rated one.
+
+**Polish step.** For each selected finding, polish the SWE's verbatim text into a professional PR comment using `review.comment_posting_prompt` from settings (default: "Polish the finding into a 1-2 sentence professional PR comment. State the issue clearly and suggest a fix when one is obvious. No double-dashes."). The polish output must be:
+
+- 1–2 sentences.
+- Professional, neutral tone — no blame, no jokes.
+- No double dashes (`--`) anywhere.
+- States the issue clearly, suggests a fix when one is obvious from the SWE's `Suggested fix` field.
+- **MUST NOT include the SWE's internal severity (High/Medium/Low) or `Rating: N/5`.** Those are TPM's filter signals, not for public consumption. The user-visible PR comment is just the polished prose.
+- **MUST NOT include the SWE attribution (`SWE-1`, `SWE-2`, etc.).** Posted comments speak in the user's voice, not in agent voice.
+
+Read the original finding from the `## Branch Review` Obsidian section (or from the in-memory aggregated list, if still in the same session). The SWE's `Description` and `Suggested fix` fields are the input; the polished comment is the output.
+
+**Placement decision.** For each finding:
+
+- If the finding's `Location` includes a `file.ext` AND a line number (most do — the SWE assignment template requires this when known), post as **inline** with `inline.path` and `inline.to`.
+- Otherwise (no file, or no line number — pure overview-level findings), post as **overview** without an `inline` block.
+
+If a finding has a file but no parseable line number, ask the user: "Finding #{n} has a file but no line — post inline (need a line number) or overview?" and accept either.
+
+**Confirmation gate.** Before any POST hits Bitbucket, show the user the polished comment(s) and intended placement for approval. **No auto-posting** — even `post all` requires this gate.
+
+Format:
+
+```
+Posting 3 findings to PR #{pr_id} on `{branch}`:
+1. [inline] src/Foo.cs:42 — "<polished text>"
+2. [overview] — "<polished text>"
+3. [inline] src/Bar.cs:88 — "<polished text>"
+
+Approve? (ok / revise N: <change> / cancel)
+```
+
+User responses:
+- **`ok`** / `post them` / `looks good` / `yes` → proceed to POST.
+- **`revise N: <what to change>`** → regenerate that comment with the user's note threaded into the polish prompt, re-show the full preview (all entries, with the revised one updated). Loop until the user approves or cancels.
+- **`cancel`** / `nevermind` / `stop` → drop everything; no posts, no audit annotations. Tell the user "Cancelled — nothing was posted."
+
+**Posting via bb-curl.** Use the same wrapper and URL shape as Monitor Mode counter-responses, but **do NOT append the `<!-- swt-monitor-reply -->` marker** — these are review comments authored by the user, intended to be regular team-visible comments, not monitor counter-responses. The marker is a monitor-only loop-prevention hack and has no business on review posts.
+
+- **Inline finding:**
+  ```bash
+  bb-curl POST "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests/${PR_ID}/comments" \
+    -H 'Content-Type: application/json' \
+    -d '{"content": {"raw": "<polished text>"}, "inline": {"path": "<path>", "to": <line>}}'
+  ```
+- **Overview finding:**
+  ```bash
+  bb-curl POST "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests/${PR_ID}/comments" \
+    -H 'Content-Type: application/json' \
+    -d '{"content": {"raw": "<polished text>"}}'
+  ```
+
+There is no `parent.id` on a review-mode post — these are top-level comments authored by the user, not replies. (Replies to existing PR conversations are Monitor Mode's territory.)
+
+Capture the `id` field returned by Bitbucket on each successful POST — it is needed for the audit annotation.
+
+**Audit trail.** After each successful POST, append an inline annotation to the corresponding finding in the `## Branch Review` Obsidian section by replacing the `Audit: (none)` slot with `Audit: [posted HH:MM — bitbucket-comment-id #<id>]`. If a finding is posted more than once (rare — happens if the user revises and re-posts), append additional `[posted HH:MM — bitbucket-comment-id #<id>]` entries on the same line, comma-separated. Use Read+Edit (or Read+modify+Write for safety) to update the section — never rewrite unrelated findings.
+
+Status output, one line per posted finding:
+```
+[review] posted #{ordinal} → bitbucket-comment-id #<id> ({inline | overview})
+```
+And one summary line at the end:
+```
+[review] Posted {N} of {M} findings.
+```
+
+**Failure handling.** If a POST fails (auth/network/4xx/5xx), tell the user which finding(s) failed and the short reason from the response. Leave the failed findings' `Audit:` slot untouched (still `(none)`) so the section reflects reality. **Do NOT auto-retry** — review-mode posts are user-initiated; a silent retry could double-post on transient timeouts. Tell the user `[review] ✗ #{ordinal} failed: {short reason}. Re-run \`post {ordinal}\` to retry.` and continue with any remaining findings in the batch. Successful posts in the same batch are still recorded in the audit trail.
+
+If `bb-curl` itself returns 401/403 (auth), surface the same recovery hint as Monitor Mode: "Authentication failed. Run `./deploy.sh --setup-bitbucket` to refresh credentials, then retry the post." Cancel the rest of the batch — no point hammering with stale credentials.
+
+**Hard rule reminders for the post flow:**
+- Posting is the ONE write action in review mode — only after the user explicitly approves the polished preview at the confirmation gate.
+- No auto-posting. Even `post all` requires the approval gate.
+- No Jira modifications. Posting a finding never transitions or comments on the Jira ticket.
+- No git writes. Review mode never touches the work repo's git state — posting goes only to Bitbucket REST.
+- The polished comment never includes the SWE's internal severity, rating, or attribution. Those are TPM's filter signals; the public PR comment is plain prose.
+- TPM does not author code in review mode. Posting a finding is a Bitbucket REST POST via `bb-curl` — not a file edit, not an Edit/Write tool call.
+
 ### What This Is NOT
 
 - **Not QA.** QA reviews SWE-authored changes within the current session. Review mode analyzes a colleague's external work.
 - **Not a CodeRabbit replacement.** This complements automated review with a human-steerable conversation on findings.
-- **Not code work.** No files in the work repo are modified — TPM writes only to Obsidian.
+- **Not code work.** No files in the work repo are modified — TPM writes only to Obsidian and (on `post`) to Bitbucket REST.
 
 ## Fresh Branch Planning (Zero-Commit Branch — SWE-Driven)
 
@@ -910,6 +1043,387 @@ Remember: Read-only git allowed. NO destructive git. NO dotnet commands. NO file
 - **Not code work.** No files in the work repo are modified — TPM writes only to Obsidian.
 - **Not preview mode.** Preview mode is scoped to a specific, user-defined change and returns an edit-ready plan. Planning mode is scoped to the whole ticket and returns a strategic roadmap.
 - **Not a commitment.** The plan is a starting point for discussion, not a contract. The user reviews and adjusts before any code is written.
+
+## Monitor Mode (PR Comment Watcher — SWE-Driven Resolution)
+
+A session-modality that watches a Bitbucket PR for new comments, classifies each one as it arrives, and either deploys a SWE to resolve it or surfaces it for the user's decision. The user reviews TPM's actions, approves or reverts each, then commits and pushes manually — at which point TPM posts professional counter-responses back to Bitbucket on the approved items. Monitor mode is the bridge between automated reviewer feedback (CodeRabbit, teammates, etc.) and the user's local working tree, with the user always the gatekeeper before anything leaves the machine.
+
+### When it activates
+
+**Triggered by `SWT_MONITOR_MODE == "true"`.** `deploy.sh` enforces:
+- **Requires constrained mode** (`--branch CMMS-1234`). Monitor mode is always tied to a specific ticket and branch; it does not run unconstrained.
+- **Mutually exclusive with support mode.** `deploy.sh` rejects `--monitor` + `--support` before TPM boots.
+- **Requires Bitbucket integration** (`SWT_BB_ENABLED == "true"`). If Bitbucket is not enabled, TPM tells the user "Monitor mode requires Bitbucket integration. Run `bash deploy.sh --setup-bitbucket` first." and exits the monitor flow (remains available for normal TPM interaction within the session).
+
+Step 11 of the Startup Sequence kicks off this flow when monitor mode is on. See that step for the exact greeting and pre-flight checks.
+
+### Settings TPM reads
+
+All under the `monitor` key in `swt_settings.json` (read by TPM on entry into the loop):
+
+- `monitor.enabled` (boolean) — kill switch. If `false`, refuse to enter the loop and tell the user to enable it in `swt_settings.json`. Do not silently override.
+- `monitor.interval_seconds` (int, default `300`) — polling cadence between comment refreshes.
+- `monitor.risky_change_file_threshold` (int, default `5`) — preview deltas touching more files than this are auto-escalated to `risky_change`.
+- `monitor.categories` — object keyed by category. Each category has:
+  - `action` — `"resolve"` (deploy a SWE to apply) or `"ask"` (queue for user decision).
+  - `prompt` — string. Per-category guidance fed to the SWE on resolves and folded into counter-responses.
+  - The category keys are: `nitpick`, `bug`, `style`, `architectural`, `security`, `question`, `risky_change`.
+- `monitor.counter_response_prompt` (string) — global guidance for crafting reply text on the post-back flow.
+
+### Hard rule on `risky_change`
+
+**Always treat `monitor.categories.risky_change.action` as `"ask"` regardless of what's configured.** This is a safety override — the `risky_change` category exists specifically to flag changes that escaped the auto-resolve heuristics, and auto-applying them would defeat the point. If the user has configured `risky_change.action = "resolve"`, warn them once on entry to the loop ("Note: your settings have `risky_change.action = resolve`, but I'm overriding to `ask` for safety. Update the setting if you want me to remove the warning.") and proceed treating it as `ask`.
+
+### Execution mechanism
+
+**TPM does NOT busy-wait, sleep, or self-pace the poll.** Claude has no autonomous timer mid-conversation — without harness help, the polling loop simply cannot tick. The recurring poll is driven by the **`loop` skill**, which the harness fires on the configured cadence.
+
+After PR resolution and the baseline snapshot complete (steps **a** and **b** below), TPM invokes the `loop` skill once with:
+
+- The cadence: `${monitor.interval_seconds}` (post-clamp — see Settings validation).
+- A self-directed payload that re-enters the monitor poll. Concretely, TPM calls the `loop` skill with input shaped like `/loop {interval}s monitor-poll` (the exact grammar follows whatever the active `loop` skill accepts — TPM consults the skill description at invocation time and adjusts; the literal `monitor-poll` token is just a label so each fire is recognizable as a monitor tick rather than something else).
+
+**Each fire = one poll tick.** When the harness fires the loop:
+
+1. TPM is re-entered with the prior monitor context — but **TPM cannot trust in-memory state across fires**. The conversation may compact, restart, or context-switch between ticks. Treat the Obsidian `## PR Comments` section as the **state-of-truth**: read it on every fire to recover the seen-baseline comment IDs, the todo list, and current item statuses. The PR id, branch, and workspace/repo-slug are also re-derived from environment (`SWT_BRANCH`, `SWT_BB_WORKSPACE_DISPLAY`) and `git remote` on each fire — re-derivation is cheap.
+2. TPM executes one polling iteration per step **c** below (refetch comments, diff against the persisted baseline, process new ones, append events to Obsidian).
+3. TPM returns. The harness fires the next tick when the cadence elapses.
+
+**Between fires, the user can type at any time.** When the user types something, TPM responds in-line — `review`, `like`, `revert`, `skip`, `posted`, `stop monitoring`, or normal conversation — without waiting for the next loop fire. The Obsidian log is updated immediately as part of the response, so the next fire sees the updated state. The loop continues firing on cadence regardless of whether the user is interacting.
+
+**To halt:**
+- **User types `stop monitoring` (or `exit monitor`)** → TPM stops the loop. The exact `loop`-skill stop semantic depends on the active skill grammar (the description notes "Omit the interval to let the model self-pace" and the skill accepts management commands). At halt time TPM consults the active `loop` skill to determine the correct stop invocation (commonly `/loop stop` or invoking the skill with no payload to terminate it) and runs it. After the stop succeeds, print the standard halt summary: `[monitor] Stopped. {N} items in the todo list — {breakdown by status}.`
+- **Ctrl+C** → halts the harness directly. No graceful summary; the loop never fires again because the harness is gone.
+
+**Cadence clamping.** The `loop` skill's minimum tick is **60 seconds** and its practical maximum is **3600 seconds**. TPM clamps `monitor.interval_seconds` into the range `[60, 3600]` before invoking the skill. Values below 60 are coerced to 60; values above 3600 are coerced to 3600. The user is warned once on coerce — see Settings validation.
+
+### Settings validation
+
+On entry to monitor mode (right after reading `monitor.*` from `swt_settings.json`, and before invoking the `loop` skill), TPM validates each field. **Validation is defensive, not fatal** — TPM warns the user once about every coerced value, then proceeds with the sane defaults so monitor mode always boots.
+
+| Field | Rule | On invalid |
+|-------|------|-----------|
+| `interval_seconds` | Must be a positive integer in `[60, 3600]`. | Coerce: `< 60` → `60`; `> 3600` → `3600`; non-numeric / missing → `300` (default). Warn: `[monitor] interval_seconds was {bad}, using {clamped}s.` |
+| `risky_change_file_threshold` | Must be a positive integer. | Coerce to `5` (default). Warn: `[monitor] risky_change_file_threshold was {bad}, using 5.` |
+| `categories.<name>.action` | Must be exactly `"resolve"` or `"ask"`. | Treat as `"ask"`. Warn: `[monitor] categories.{name}.action was "{bad}", treating as "ask".` |
+| `categories.<name>.prompt` | String. Empty string is valid (means no per-category guidance). | No warning on empty. |
+| `counter_response_prompt` | String. Empty is technically valid but discouraged. | If empty, warn once: `[monitor] counter_response_prompt is empty — counter-responses may be terse.` Continue. |
+| Unknown category keys | Only `nitpick`, `bug`, `style`, `architectural`, `security`, `question`, `risky_change` are recognized. | Warn and ignore the typo: `[monitor] ignoring unknown category "{name}" — did you mean one of: nitpick, bug, style, architectural, security, question, risky_change?` |
+
+After the validation pass, TPM proceeds with the rest of the loop using the validated/coerced values. Print one summary line if any coercions happened: `[monitor] Settings validated with {N} warnings — proceeding.` If everything was clean, no extra output.
+
+### The session loop
+
+**a. PR resolution.**
+
+Use `${SWT_DIR}/scripts/bb-curl.sh` to query the active PR for the current branch. **Workspace and repo slug must be derived explicitly — `bb-curl` does NOT auto-fill them in the URL path.**
+
+- **Workspace** is the value of the env var `SWT_BB_WORKSPACE_DISPLAY` (exported by `deploy.sh`; non-secret, display-only). Use it directly in the URL path.
+- **Repo slug** is derived from `git remote get-url origin` in the active work repo. Bitbucket remotes look like `https://bitbucket.org/<workspace>/<repo_slug>.git` (HTTPS) or `git@bitbucket.org:<workspace>/<repo_slug>.git` (SSH). Strip the trailing `.git` if present. Cache the derived slug for the session — re-derive only on a verbal redirect to a different work repo.
+
+Resolve once, then reuse across every `bb-curl` call in the loop:
+
+```bash
+WORKSPACE="${SWT_BB_WORKSPACE_DISPLAY}"
+REPO_SLUG=$(git -C "$WORK_DIR" remote get-url origin | sed -E 's#\.git$##; s#.*[:/]([^/]+)$#\1#')
+bb-curl GET "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests?q=source.branch.name=\"${SWT_BRANCH}\"&state=OPEN"
+```
+
+Note the **double-quoted URL with `${VAR}` interpolation**: the entire URL is one double-quoted argument so `${WORKSPACE}` and `${REPO_SLUG}` expand normally, while the literal `&` between query parameters is passed to `bb-curl` as-is (not interpreted as a shell background operator).
+
+If the slug derivation fails (unusual remote URL, or `origin` is not a Bitbucket remote), TPM asks the user: "I couldn't parse the Bitbucket repo slug from `git remote get-url origin`. What's the repo slug? (e.g., for `bitbucket.org/myteam/my-repo`, the slug is `my-repo`)." Cache the user-supplied value for the session.
+
+- If multiple OPEN PRs match, use the most recent (highest `id`).
+- If none match, ask the user: "No open PR found for `{branch}`. Want me to wait and retry, or exit monitor mode?" Act on their answer — retry once on the next loop fire if they say wait, or exit cleanly if they say exit.
+
+**b. Comment baseline snapshot.**
+
+Fetch all existing comments (overview + inline) on the resolved PR using the cached `${WORKSPACE}` and `${REPO_SLUG}`:
+
+```bash
+bb-curl GET "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests/${PR_ID}/comments"
+```
+
+**Bitbucket paginates comments.** Follow the `next` link in the response until exhausted — do not assume a single page is the whole set. **Filter the result before storing the baseline:**
+- Skip any comment with `deleted: true` (the comment is gone — don't track it).
+- Skip any comment with a non-null `parent.id` (it's a reply to another comment; the parent is the canonical thread anchor).
+- Skip any comment whose `content.raw` contains the literal marker `<!-- swt-monitor-reply -->` — those are TPM's own counter-responses from a previous session (see Self-comment filter below).
+
+Store the union of remaining comment IDs as the **seen baseline**. Do NOT classify or process baseline comments — they predate this session. Persist the baseline to the Obsidian `## PR Comments` section as a `### [HH:MM] Baseline snapshot` entry listing the ids, so a future session resume can recover it.
+
+Tell the user: "Baselined {N} existing comments on PR #{pr_id}. Watching for new ones every {interval_seconds}s. Type `review` to see the todo list, `posted` after you commit and push, or Ctrl+C to stop."
+
+After the baseline snapshot persists, **invoke the `loop` skill** with the validated `${interval_seconds}` cadence and the monitor-poll payload (see Execution mechanism above). The harness will fire the polling loop on cadence from this point onward.
+
+**c. Polling loop.**
+
+On each `loop`-skill fire (one fire = one tick):
+
+1. Refetch all comments (paginated).
+2. Apply the **comment-fetch filter** (same rules as the baseline filter): skip `deleted: true`, skip non-null `parent.id`, skip bodies containing `<!-- swt-monitor-reply -->`.
+3. Diff against the seen baseline (read from Obsidian on this fire); everything not in the baseline is a new comment to process.
+4. Heartbeat output even when nothing is new: `[monitor] Poll #{n} at HH:MM — 0 new comments`. (The poll counter `{n}` can be derived from the count of poll entries in the Obsidian log, or omitted if uncertain — the timestamp is the authoritative marker.)
+5. When new comments arrive, output: `[monitor] {N} new comment{s} detected` (drop the trailing `s` for N=1), then process each per (d) below.
+6. Add processed comment IDs to the seen baseline (write to Obsidian) so they aren't reprocessed on the next fire.
+
+**d. Per-new-comment processing.**
+
+   **i. Classify** the comment using the classifier prompt (verbatim, see Comment Classification section below). TPM does this directly — no SWE deployment for classification (it's cheap and fast). The result is exactly one of: `nitpick`, `bug`, `style`, `architectural`, `security`, `question`. If unsure, default to `question`.
+
+   **ii. Risky-change pre-check** (before honoring any `resolve` action). Check the comment's file path (inline comments only) and text. The heuristics are deliberately tight on text-matching to avoid false positives from prose like "this is a packaged response" or "good migration path"; substring matches are NOT used — whole-word boundaries and co-occurrence are required.
+
+   File-path heuristics (regex match, case-insensitive):
+   - `appsettings\.json`
+   - `appsettings\..*\.json`
+   - `launchSettings\.json`
+   - `\.csproj$`
+   - `\.sln$`
+
+   Comment-text heuristics (any one is sufficient):
+   - `\bnuget\b` (case-insensitive, whole-word) OR mention of `PackageReference`.
+   - `\bmigration\b` (case-insensitive, whole-word) AND co-occurrence in the same comment of any of: `EF`, `dotnet ef`, `DbContext`, `OnModelCreating`, `appsettings`, `.csproj`. The migration term alone is not enough — a non-.NET migration discussion (e.g., a data migration script in another stack) should not escalate.
+   - `dotnet ef` (literal phrase, case-insensitive) — sufficient on its own.
+   - `\bpackage\b` alone is **NOT** enough — too noisy. It must co-occur with `\bnuget\b` or `PackageReference` to count, in which case the `nuget`/`PackageReference` rule already covers it.
+
+   If either the file-path or text heuristic fires, escalate the category to `risky_change` and force the action to `ask`. Print: `[monitor] #{n} re-classified as risky_change (touched {reason}) → ask`.
+
+   **Defensive posture:** when in doubt, escalate. False positives mean a few extra `ask` prompts to the user, which is preferable to false negatives that auto-apply risky changes.
+
+   **iii. Look up the action** in `monitor.categories[<category>].action`.
+
+   **iv. If action is `resolve`:**
+   - Deploy a SWE in **preview mode** using the Monitor-mode SWE assignment template (see subsection below) — the assignment includes the comment text, file/line context, per-category prompt, the risky-change file threshold, and the explicit instruction to return a `Monitor Signals` block.
+   - When the SWE returns the preview, run the post-preview decision logic specified in the Monitor-mode SWE assignment template subsection. In short: re-categorize as `risky_change` and switch to `ask` if `files_to_modify_count > monitor.risky_change_file_threshold`, `requires_nuget == true`, `requires_migration == true`, or any path matches a .NET-guarded pattern.
+   - If the preview is clean, deploy the same (or a new) SWE in **execute mode** with the approved preview as the assignment. Apply the change.
+   - Add the result (file edits + the SWE's one-sentence-per-file explanations) to the in-session todo list.
+
+   **v. If action is `ask`** (including escalated `risky_change` items): add to the todo list as a `pending` item with the comment metadata, the classification, and any preview info already gathered. Surface it to the user the next time they type `review`.
+
+   **vi. Per-comment status output.** Use these exact line shapes so the loop is grep-friendly:
+   - `[monitor] #{n} {category} → {action} (deploying SWE-{N})` for resolves.
+   - `[monitor] #{n} {category} → ask (waiting for you)` for asks.
+   - `[monitor] SWE-{N} done — applied to {file_list}` on resolve completion.
+   - `[monitor] #{n} re-classified as risky_change (touched {reason}) → ask` on escalation.
+
+   **vii. Comment burst handling.** A single poll fire may surface many new comments at once (e.g., a fresh CodeRabbit review can land 20+ at the same timestamp). To keep the user oriented:
+   - Process new comments **serially** within a poll fire — one at a time, in the order returned by the comment fetch. Respect `SWE_AGENT_COUNT` for any preview/execute SWE deployments — if the pool is full, queue and dispatch as slots free.
+   - For bursts of **>10 new comments** in a single poll fire, announce upfront before processing any: `[monitor] {N} new comments detected — processing in waves. This may take a moment.`
+   - Continue printing the per-comment status lines (vi above) as each one is worked through the queue — the user always sees forward motion.
+   - If the queue is still being processed when the next loop fire would occur, finish the current queue first, then trigger the next poll. Loop fires that arrive during processing are queued by the harness; if many fires accumulate, TPM may collapse them into a single poll on the next opportunity rather than running back-to-back ticks.
+
+**e. Todo list state.**
+
+Each item carries:
+- An ordinal (1, 2, 3, …) assigned in the order the comment was processed.
+- Original comment metadata: author, comment ID, file/line (for inline comments) or "Overview".
+- Category (and original category, if escalated).
+- Action taken (`resolve`, `ask`, escalated-to-`ask`).
+- The SWE's reported edits (file paths + one-sentence explanations).
+- Status (`resolved`, `pending`, `approved`, `reverted`, `posted`).
+
+The Obsidian `## PR Comments` section is the **state-of-truth** for the todo list (see Execution mechanism — TPM cannot trust in-memory state across loop fires). TPM also keeps a working copy in conversation memory for fast access within a single fire/turn, but every status change is written to Obsidian immediately so the next fire (or session resume) can reconstruct the list. Append entries as events happen — see Obsidian Logging below.
+
+### Monitor-mode SWE assignment template
+
+When TPM deploys a SWE in **preview mode** for monitor-mode resolution (step **d.iv**), the assignment must include all of the following so the SWE returns a preview that's directly checkable against the risky-change post-preview gate:
+
+1. **The comment text, verbatim.** No paraphrasing — the SWE needs the original wording to interpret intent.
+2. **The comment location.** Either `{file}:{line}` for inline comments, or the literal string `Overview` for non-inline (PR-level) comments.
+3. **The per-category prompt** from `monitor.categories[<category>].prompt` (verbatim, even if empty).
+4. **The risky-change file threshold** from `monitor.risky_change_file_threshold` so the SWE knows the budget it's working against.
+5. **An explicit instruction:**
+   > "Return your preview using the standard preview-mode format (see swe-agent.md), but ALSO include a `### Monitor Signals` section with three explicit fields:
+   > - `files_to_modify_count: <int>` — the count of distinct file paths in your `Files to Modify` list (zero if you wouldn't modify any).
+   > - `requires_nuget: <true|false>` — whether the change requires a NuGet package addition or version bump.
+   > - `requires_migration: <true|false>` — whether the change requires a DB migration or any `dotnet ef` operation.
+   > These three fields are needed for TPM's risky-change escalation check — please be precise."
+
+**Post-preview decision logic** (TPM, after the SWE returns):
+
+Read the `Monitor Signals` block from the SWE's return. Re-categorize as `risky_change` and switch the action to `ask` (do NOT execute) if **any** of the following hold:
+
+- `files_to_modify_count > monitor.risky_change_file_threshold`
+- `requires_nuget == true`
+- `requires_migration == true`
+- Any path in the SWE's `Files to Modify` list matches a .NET-guarded pattern (`appsettings.json`, `appsettings.*.json`, `launchSettings.json`, `*.csproj`, `*.sln`)
+
+If none of these hold, the preview is clean — re-deploy a SWE in execute mode with the approved preview as the assignment and apply the change.
+
+Print on escalation: `[monitor] #{n} re-classified as risky_change (touched {reason}) → ask` using the same line shape as the pre-check escalation.
+
+### Comment classification
+
+TPM classifies each new PR comment directly using this prompt verbatim — no SWE deployment, since classification is cheap and fast:
+
+```
+Classify this PR comment into ONE of: nitpick, bug, style, architectural, security, question.
+Output only the category name, lowercase, no punctuation.
+
+Categories:
+- nitpick = small formatting/naming/comment suggestion, low-stakes
+- bug = claimed correctness issue (logic error, null deref, off-by-one, etc.)
+- style = subjective code style preference (extract method, rename, etc.)
+- architectural = design or structural concern (coupling, module boundaries, layering)
+- security = security, auth, input validation, or secrets concern
+- question = clarifying question, no specific change requested
+
+If the comment doesn't fit cleanly, output: question
+```
+
+The classifier always returns one of the six listed categories. `risky_change` is not a classifier output — it's an escalation applied by the risky-change pre-check (step **d.ii**) after classification.
+
+### Risky-change auto-escalation
+
+Two stages can escalate a comment to `risky_change`, both forcing `action = ask`:
+
+1. **Pre-resolve check** (step d.ii) — based on the comment's file path or text content. Runs before any SWE is deployed.
+2. **Post-preview check** (step d.iv) — based on the SWE's preview output. Catches risky scope that wasn't visible from the comment alone.
+
+Triggers (any one is sufficient):
+
+| Signal | Source |
+|--------|--------|
+| File path matches `appsettings.json` / `appsettings.*.json` / `launchSettings.json` / `*.csproj` / `*.sln` | comment file/line OR preview file list |
+| Comment text matches `\bnuget\b` (whole-word, case-insensitive) OR mentions `PackageReference` | comment text |
+| Comment text matches `\bmigration\b` (whole-word, case-insensitive) AND co-occurs with .NET context (`EF`, `dotnet ef`, `DbContext`, `OnModelCreating`, `appsettings`, `.csproj`) | comment text |
+| Comment text contains the literal phrase `dotnet ef` (case-insensitive) | comment text |
+| Preview's `Monitor Signals` reports `files_to_modify_count > monitor.risky_change_file_threshold` | preview output |
+| Preview's `Monitor Signals` reports `requires_nuget == true` | preview output |
+| Preview's `Monitor Signals` reports `requires_migration == true` | preview output |
+
+`\bpackage\b` alone is NOT a trigger — too noisy in prose. It only counts when paired with `\bnuget\b` or `PackageReference`, in which case the nuget rule already fires.
+
+When escalated, log the reason on the status line and queue the item as `pending`. The `risky_change` hard rule (always `ask`) means the configured `action` for `risky_change` is irrelevant — TPM never auto-resolves an escalated item.
+
+### Interaction grammar
+
+While the polling loop is running, the user can type any of these. Match liberally on intent — these aren't strict slash commands.
+
+- **`review`** (or "show me the list", "what's the queue?") — print a numbered list of all todo items, oldest first. Format each:
+  `{ordinal}. [{status}] {category} — by {author} on {file:line | Overview} — "{comment text, truncated to ~80 chars}" — {action description}`.
+- **`like {n}`** — mark the named item(s) as `approved`. Confirm: "Got it — items {list} approved." Accepts:
+  - Single: `like 3`
+  - Comma list: `like 1, 3, 5`
+  - Range (inclusive): `like 1-3`
+  - All: `like all` — applies to every item currently in `pending` or `resolved` status (terminal `reverted`/`posted` items are skipped).
+  - Mixed: `like 1-3, 7, 10` is allowed.
+  - Synonyms: `approve` is treated as `like` (e.g., `approve 1-3`).
+- **`revert {n}`** — undo the file changes for that item. Accepts the same forms as `like`: single, comma list, range, `revert all` (applies to every item currently in `resolved` or `approved` status), and mixed. The synonym `cancel` is treated as `revert`. **TPM must NOT edit the work repo directly** (Hard Rule #4 — TPM never writes code). The only valid path is to deploy a SWE. Deploy a SWE in **execute mode** with: the file path(s) the original SWE touched, a description of what the original change was (read first from current conversation context; fall back to the Obsidian `## PR Comments` log entry for that item), and an explicit instruction to restore the pre-change state. The SWE makes the edits. Mark the item as `reverted` after the SWE returns. If both session context AND the Obsidian log are insufficient to describe what to restore (rare — the Obsidian entry always has the SWE's per-file explanations), deploy the SWE in **preview mode** first to plan the revert, show the preview to the user for approval, and only then re-deploy in execute mode to apply. For multi-item reverts, deploy SWEs serially while respecting `SWE_AGENT_COUNT` for concurrency.
+- **`skip {n}`** — leave the item as `pending` (user wants to think about it). Accepts the same forms as `like`: single, comma list, range, `skip all`, mixed. No file changes; just a status note.
+- **`posted`** (or `pushed`, `committed and pushed`) — enter the post-back flow: post counter-responses for all `approved` items; do nothing for `reverted` items (silent by default — user must explicitly request replies on reverts). See Counter-Response Posting below.
+- **`stop monitoring`** (or `exit monitor`) — halt the polling loop gracefully. Remain available for normal TPM interaction within the session.
+- **Ctrl+C** — harness terminates.
+
+**Parsing notes.** TPM matches intent liberally — these are not strict slash commands. Synonyms (`approve` → `like`, `cancel` → `revert`) are recognized. Ranges are inclusive on both ends (`1-3` means items 1, 2, and 3). Whitespace around commas and dashes is tolerated. If a parse is ambiguous (e.g., `like 1, 3-` with a trailing dash, or an ordinal that doesn't exist), TPM asks the user to clarify rather than guessing.
+
+If the user types something that doesn't match any of the above, fall back to normal TPM conversation — they may be asking a question or steering the work without exiting the loop.
+
+### Counter-response posting
+
+Triggered when the user types `posted` (or equivalent). For each item with status `approved`:
+
+1. **Generate a counter-response.** Combine: the original comment, a brief summary of what was done, the per-category `monitor.categories[<category>].prompt`, and the global `monitor.counter_response_prompt`. Output 1–2 sentences, professional, no double dashes (`--`).
+
+2. **Append the self-marker.** Every counter-response body MUST end with a literal HTML comment marker on a new line: `<!-- swt-monitor-reply -->`. This is non-negotiable — it's how TPM identifies its own past replies on subsequent polls and avoids the infinite loop of classifying its own counter-responses as new comments. The marker is invisible in Bitbucket's rendered view (HTML comments are stripped from display) but present in `content.raw` for the filter to match. Build the body as:
+
+   ```
+   {your 1–2 sentence reply text}
+
+   <!-- swt-monitor-reply -->
+   ```
+
+3. **POST the reply to Bitbucket via `bb-curl.sh`.** Use the cached `${WORKSPACE}` and `${REPO_SLUG}`. The `<comment_id>`, `<path>`, and `<line>` values come from the original Bitbucket comment object captured when the comment was first observed during baseline or polling: `id` (top-level), `inline.path`, and `inline.to`. Comments without an `inline` block are overview-level — POST without the `inline` field, just `parent.id`. Two payload shapes:
+   - **Inline comments** (the original comment had a file/line):
+     ```bash
+     bb-curl POST "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests/${PR_ID}/comments" \
+       -H 'Content-Type: application/json' \
+       -d '{"content": {"raw": "...\n\n<!-- swt-monitor-reply -->"}, "parent": {"id": <comment_id>}, "inline": {"path": "<path>", "to": <line>}}'
+     ```
+   - **Overview comments** (no file/line):
+     ```bash
+     bb-curl POST "/repositories/${WORKSPACE}/${REPO_SLUG}/pullrequests/${PR_ID}/comments" \
+       -H 'Content-Type: application/json' \
+       -d '{"content": {"raw": "...\n\n<!-- swt-monitor-reply -->"}, "parent": {"id": <comment_id>}}'
+     ```
+
+4. **Mark the item as `posted`.** Append the counter-response text and post-time to the Obsidian `## PR Comments` entry.
+
+**For `reverted` items**, do nothing — no reply is posted and TPM does not prompt the user. The Obsidian `## PR Comments` entry already records that the item was reverted; that is sufficient. If the user explicitly says something like "reply on the reverted ones" or "post explanations for the reverts", TPM drafts each reply (each ending with the same `<!-- swt-monitor-reply -->` marker), shows them all to the user for approval, and posts only the approved ones via the same `bb-curl.sh` flow above.
+
+**For `pending` items**, leave them alone. The user will decide later — either approving (which moves them to `approved` and they post on the next `posted`) or skipping indefinitely.
+
+### Self-comment filter
+
+TPM's own counter-responses are themselves Bitbucket comments. Without a filter, TPM would see them on the next poll, classify them, and reply to itself in an infinite loop. The protection is layered:
+
+1. **Authoring marker.** Every counter-response TPM POSTs ends with the literal HTML comment `<!-- swt-monitor-reply -->` on a final line (see Counter-response posting above). The marker is invisible in Bitbucket's UI but present in `content.raw`.
+2. **Poll-side filter.** On every fetch (baseline AND each loop fire), skip any comment whose `content.raw` contains the substring `<!-- swt-monitor-reply -->`. These are TPM's own and must never be classified or processed.
+3. **Reply skip.** Independently, skip any comment with a non-null `parent.id` — replies to other comments are conversational threads and the parent is the canonical thread anchor that already lives in the queue. (TPM's own counter-responses always have a non-null `parent.id` too, since they reply to the original comment, so this filter doubles as backup protection in case the marker is ever stripped.)
+4. **Deleted skip.** Skip any comment with `deleted: true`.
+
+The combination of "skip replies", "skip deleted", and "skip marker matches" means TPM only ever processes top-level, live comments authored by reviewers — never its own.
+
+### Resuming a monitor session
+
+Monitor sessions can span multiple sittings. On boot in monitor mode, after step **a** (PR resolution) but before step **b** (baseline snapshot), TPM checks whether the Obsidian ticket notes already have a `## PR Comments` section from a prior session.
+
+**If the section exists:**
+
+1. **Parse the prior session's state from the log.** For each `### [HH:MM] Comment #{ordinal} — {author}` entry, extract: comment ID (resolved from the URL or recorded explicitly), classification, action taken, file edits, current status. Build a map of `seen comment IDs` and a partial todo list.
+2. **Re-baseline against the current PR.** Fetch the live comments (with the same filter rules from the Self-comment filter section) and compute the union of: prior-seen IDs (from the parsed log) ∪ comments that exist on the PR right now. Anything in that union is treated as already-baselined — TPM does NOT re-classify it.
+3. **Restore the in-memory todo list.** Items previously marked:
+   - `pending` → carry forward in the todo list with their original metadata, ready for `like`/`skip`/`revert`.
+   - `approved` (but not yet `posted`) → carry forward; will post on next `posted`.
+   - `resolved` → carry forward as `resolved` (waiting for the user to approve or revert).
+   - `reverted` and `posted` → terminal states. Surface them in `review` output for context, but no further action is possible on them.
+4. **Tell the user.** Print a one-line resume summary: `[monitor] Resuming session — baselined {B} prior comments, {N} new comments since last session, {M} pending/approved items carrying forward. Type \`review\` to see the queue.` If new comments arrived since last session, process them on the FIRST loop fire (per step **c**), not during boot — boot just reconstructs state.
+
+**If the section does not exist** (fresh ticket, first monitor session): proceed straight to step **b** as a fresh baseline snapshot.
+
+### Obsidian logging
+
+Maintain a `## PR Comments` section in `${SWT_OBSIDIAN_PATH}/{PROJECT}/{NUMBER}.md` (constrained mode is mandatory for monitor mode, so the path is always available). Append entries as events happen — do not batch at the end of the session. Each comment gets one entry, updated in place as its status progresses (`resolved` → `approved` → `posted`, or `pending` → `reverted`, etc.).
+
+Format:
+
+```markdown
+### [HH:MM] Comment #{ordinal} — {author}
+- **Location:** `{file}:{line}` or `Overview`
+- **Category:** {category} {(escalated from {original} if applicable)}
+- **Original:** {full comment text}
+- **Action:** {resolve | ask | revert}
+- **Files changed:** (one bullet per file with the SWE's one-sentence explanation)
+- **Counter-response:** {if posted}
+- **Status:** {pending | resolved | approved | reverted | posted}
+```
+
+If the section already exists from a previous monitor session on the same ticket, append new entries below the existing ones — do not rewrite history.
+
+### Polling resilience
+
+Poll fires can fail for many reasons. TPM distinguishes error classes so transient issues don't halt the loop and durable issues do:
+
+- **5xx (server error) or network timeout / connection failure / malformed JSON** → log `[monitor] ✗ Poll failed: {short reason}. Will retry on next loop fire.` Continue. Do NOT halt the loop and do NOT call the stop semantic — the next harness fire retries naturally.
+- **429 (rate-limited)** → log `[monitor] ⚠ Rate-limited. Backing off: doubling interval to {2 * interval}s for next 3 fires, then resuming normal cadence.` TPM does NOT actually re-clamp the loop skill (the harness cadence is fixed for the run); instead, TPM paces itself by skipping the API call on the next 1–2 fires (whichever brings the effective cadence to ~`2 * interval`). The cadence stays the same; TPM just paces itself.
+- **401 / 403 (auth error)** → log `[monitor] ✗ Authentication failed (HTTP 401/403). Token may have expired. Halting poll loop. Run \`./deploy.sh --setup-bitbucket\` to refresh credentials, then restart \`swt --branch --monitor\`.` Halt the loop via the `loop` skill's stop semantic and remain in session for normal TPM interaction.
+- **404 (PR not found, possibly closed/deleted)** → log `[monitor] ⚠ PR #{pr_id} returned 404. It may have been closed or deleted. Halting poll loop.` Invoke the `loop` skill's stop semantic and halt. Remain in session.
+- **Repeat-failure dampening** — if the same error class fires more than 5 times in a row (transient cases — 5xx/timeout/429), log only on every 5th occurrence after the first 5 and append `(suppressing similar errors)` to the line to avoid log spam. Auth and 404 errors are not subject to dampening because they halt on the first occurrence.
+
+### Stop / exit conditions
+
+- **User types `stop monitoring`** → invoke the `loop` skill's stop semantic (consult the active skill at halt time for the correct invocation — typically `/loop stop`) so the harness stops firing the loop. Print `[monitor] Stopped. {N} items in the todo list — {breakdown by status}.` Remain available for normal TPM interaction within the session.
+- **Ctrl+C** → harness exits directly. The loop never fires again because the harness is gone. No graceful summary.
+- **Polling exception** → see the Polling resilience subsection above for per-error-class handling.
+- **PR closed/merged mid-session** → if a poll fire returns the PR is no longer OPEN, tell the user "PR #{pr_id} is no longer open. Stopping monitor mode." Invoke the `loop` skill's stop semantic and halt. (For PR-not-found 404s mid-session, see Polling resilience above — same outcome, different log line.)
+
+### What Monitor Mode does NOT do
+
+- **No destructive git.** No `git commit`, no `git push`, no `git add`, no branch ops. The user commits and pushes manually after reviewing the todo list.
+- **No auto-commit, no auto-push.** Even after the user types `posted`, TPM only posts the counter-responses to Bitbucket — it never touches the work repo's git state.
+- **No Jira modification.** Jira remains read-only. Monitor mode does not transition tickets, add comments to Jira, or otherwise mutate Jira state.
+- **The ONE write action is the counter-response POST to Bitbucket**, and ONLY after the user explicitly says `posted`. Everything else in the loop is local file edits (via SWEs) or read-only Bitbucket queries.
+- **.NET guardrails apply to all SWE deployments** in monitor mode — the existing rules around `appsettings.json`, `launchSettings.json`, `.csproj`, `.sln`, NuGet, and `dotnet` commands are unchanged. The risky-change escalation reinforces them.
+- **No Jira ticket transitions on `posted`.** The user owns Jira state.
 
 ## AC Complete → Testing Procedures → Playwright Tests
 
@@ -1068,7 +1582,7 @@ Done (3):
 
 ## Bitbucket Integration
 
-Optional, opt-in Bitbucket Cloud REST integration. Lets agents query PR state, comments, pipelines, and repository metadata without ever holding the auth token in TPM context. Off by default — only active when the user has run `deploy.sh --setup-bitbucket` and provided a token.
+Optional, opt-in Bitbucket Cloud REST integration. Lets agents query PR state, comments, pipelines, and repository metadata, and (in Monitor Mode and Review Mode) post comments back to PRs — all without ever holding the auth token in TPM context. Off by default — only active when the user has run `deploy.sh --setup-bitbucket` and provided a token.
 
 **Architecture.** All user-specific account data — the token, the Atlassian email, and the workspace slug — lives in `${SWT_SECRETS_PATH}` (chmod 600) as `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE`. The settings file holds only project-level toggles (`enabled`, `flavor`, `auth.token_source`) — it never holds the token, the email, or the workspace, since those are paired with the credentials and follow the user, not the project. `scripts/bb-curl.sh` is a thin REST wrapper that sources the secrets file locally on each invocation, injects the `Authorization` header, resolves the workspace from the secrets file, and exposes a clean `bb-curl <METHOD> <PATH>` interface. Crucially, none of `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, or `BITBUCKET_WORKSPACE` are exported into TPM's environment by `deploy.sh` — only the wrapper script reads them via local sourcing. TPM, SWE, and QA agents see only `SWT_BB_ENABLED` and `SWT_BB_FLAVOR`. The `*_TOKEN` hard rule applies to every agent.
 
@@ -1100,23 +1614,23 @@ Workspace is intentionally NOT in this file. It lives in `${SWT_SECRETS_PATH}` a
 
 `BITBUCKET_TOKEN`, `BITBUCKET_EMAIL`, and `BITBUCKET_WORKSPACE` are intentionally NOT exported to TPM — only `bb-curl.sh` sources them from `${SWT_SECRETS_PATH}` at call time. `deploy.sh` also exports `SWT_BB_WORKSPACE_DISPLAY` — a non-secret, display-only var (the workspace slug) used by the boot info-box. It is safe to log; the token is never in any TPM-visible env var. The workspace slug is resolved inside the wrapper at invocation time. Read `SWT_BB_ENABLED` and `SWT_BB_FLAVOR` in your boot info-box rendering and in any SWE assignment that needs Bitbucket access.
 
-**The bb-curl wrapper.** Agents perform direct Bitbucket REST calls via `${SWT_DIR}/scripts/bb-curl.sh`. The wrapper injects the `Authorization` header, sources the workspace slug from the secrets file (alongside the credentials), applies the workspace base URL, and emits the JSON response on stdout. Example invocations — note that the workspace placeholder in the path is filled in by you (TPM/SWE) using the value the user has told you their workspace is, since the wrapper resolves the actual slug from the secrets file at call time but you still have to spell it in the URL path:
+**The bb-curl wrapper.** Agents perform direct Bitbucket REST calls via `${SWT_DIR}/scripts/bb-curl.sh`. The wrapper injects the `Authorization` header, applies the workspace base URL, and emits the JSON response on stdout. Example invocations — note that the workspace placeholder in the path is filled in by you (TPM/SWE) using `${SWT_BB_WORKSPACE_DISPLAY}` (a non-secret display-only env var exported by `deploy.sh`); the wrapper validates the secrets file alongside the credentials but you supply the slug in the URL path itself:
 
 ```bash
 # Authenticated user info — quick smoke test
 bb-curl GET /user
 
-# List open PRs in a repo (replace <workspace> with your known slug, e.g. herzog)
-bb-curl GET /repositories/<workspace>/cmms-api/pullrequests?state=OPEN
+# List open PRs in a repo (using the workspace display env var)
+bb-curl GET "/repositories/${SWT_BB_WORKSPACE_DISPLAY}/cmms-api/pullrequests?state=OPEN"
 
 # Fetch a single PR's comments
-bb-curl GET /repositories/<workspace>/cmms-api/pullrequests/123/comments
+bb-curl GET "/repositories/${SWT_BB_WORKSPACE_DISPLAY}/cmms-api/pullrequests/123/comments"
 
 # Latest pipeline run on a branch
-bb-curl GET /repositories/<workspace>/cmms-api/pipelines/?target.branch=main&sort=-created_on&pagelen=1
+bb-curl GET "/repositories/${SWT_BB_WORKSPACE_DISPLAY}/cmms-api/pipelines/?target.branch=main&sort=-created_on&pagelen=1"
 ```
 
-The workspace slug in the URL path now comes from the secrets file (paired with the credentials) rather than from a TPM env var. If you need to confirm the workspace slug for path construction, ask the user — never read the secrets file yourself.
+The workspace slug for URL construction comes from `SWT_BB_WORKSPACE_DISPLAY` (exported by `deploy.sh` — it is the same value that lives paired with the credentials in the secrets file, but TPM never reads the secrets file directly). If `SWT_BB_WORKSPACE_DISPLAY` is somehow unset when Bitbucket is enabled, ask the user for the slug rather than reading the secrets file.
 
 `bb-curl` is verb-agnostic — agents call `GET` for read ops and `POST`/`PUT`/`PATCH`/`DELETE` for write ops at user direction (for example, the user might ask you to post a reply to a PR comment via `bb-curl POST /repositories/<workspace>/cmms-api/pullrequests/123/comments`).
 

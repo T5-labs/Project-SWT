@@ -16,7 +16,7 @@ This document is the reference for SWT's Bitbucket Cloud integration: a `bb-curl
 | Token storage | `${SWT_SECRETS_PATH}` (= `${WIN_HOME_DIR}/.swt_secrets`), chmod 600. Three fields: `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE`. |
 | Settings file `bitbucket` block | `enabled`, `flavor`, `auth.token_source`. Workspace moved to secrets file — it is user-specific account data, not project config. |
 | Initial ops scope | Read and write via `bb-curl` at user direction. Safety boundary is the agent hard rule (never see token, never construct headers, always go through the wrapper). |
-| Schema version | `_schema: 3`. v3 added the `bitbucket` block. |
+| Schema version | `_schema: 5`. v3 added the `bitbucket` block. v4 adds the `monitor` block (Monitor Mode polling, per-category policies, counter-response prompt). v5 adds the `review` block (Review Mode posting, per-finding rating threshold, comment polishing prompt). |
 
 ---
 
@@ -26,8 +26,8 @@ This document is the reference for SWT's Bitbucket Cloud integration: a `bb-curl
 
 **Delivered artifacts:**
 - `scripts/bb-curl.sh` — REST wrapper, HTTP Basic auth, sources secrets locally, never echoes credentials.
-- `deploy.sh` — `_resolve_bitbucket_secrets` function, `--setup-bitbucket` interactive setup flow, schema migration v2→v3.
-- `swt_settings.json` schema bumped to v3, `bitbucket` block added (disabled by default).
+- `deploy.sh` — `_resolve_bitbucket_secrets` function, `--setup-bitbucket` interactive setup flow, schema migration v2→v3, schema migration v3→v4 (`monitor` block with defaults), schema migration v4→v5 (`review` block with defaults).
+- `swt_settings.json` schema bumped to v3 (`bitbucket` block added, disabled by default), then v4 (`monitor` block added with polling interval, per-category policies, and counter-response prompt), then v5 (`review` block added with Review Mode posting, per-finding rating threshold, and comment polishing prompt).
 - `${SWT_SECRETS_PATH}` template with `# === Bitbucket Cloud ===` header and 3 fields (`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE`).
 - Hard rule "NEVER read or echo secrets" added to all agent definitions.
 - Full docs: `SETUP.md` Section 6, `CLAUDE.md` Bitbucket Integration section, `tpm-agent.md` Bitbucket Integration section, `README.md` features, schema row, and directory tree.
@@ -39,6 +39,19 @@ This document is the reference for SWT's Bitbucket Cloud integration: a `bb-curl
 scripts/bb-curl.sh GET /user
 scripts/bb-curl.sh GET /repositories/herzog/cmms-api/pullrequests
 scripts/bb-curl.sh GET /repositories/herzog/cmms-api/pullrequests/42/comments
+
+# Find the open PR for a specific branch (used by Monitor Mode on startup)
+scripts/bb-curl.sh GET '/repositories/herzog/cmms-api/pullrequests?q=source.branch.name="bugfix/CMMS-1234-foo"&state=OPEN'
+
+# Post an overview comment
+scripts/bb-curl.sh POST /repositories/herzog/cmms-api/pullrequests/42/comments \
+    -H 'Content-Type: application/json' \
+    -d '{"content":{"raw":"Fixed the null check — added guard on line 84."}}'
+
+# Post an inline reply (parent.id = comment being replied to; inline.path + inline.to = line anchor)
+scripts/bb-curl.sh POST /repositories/herzog/cmms-api/pullrequests/42/comments \
+    -H 'Content-Type: application/json' \
+    -d '{"content":{"raw":"Done."},"parent":{"id":101},"inline":{"path":"src/Services/EquipmentService.cs","to":84}}'
 
 # Absolute paths (e.g. paginated next-links) are used as-is
 scripts/bb-curl.sh GET https://api.bitbucket.org/2.0/repositories/herzog/cmms-api/pullrequests?page=2
