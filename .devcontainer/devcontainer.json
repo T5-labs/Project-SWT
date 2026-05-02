@@ -1,0 +1,26 @@
+{
+  "name": "swt-ci",
+  "image": "mcr.microsoft.com/playwright:v1.48.0-jammy",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  },
+  "remoteEnv": {
+    "SWT_DIR": "${containerWorkspaceFolder}/Project-SWT",
+    "SWT_CI_MODE": "true"
+  },
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code && npx playwright install --with-deps chromium",
+  "containerEnv": {
+    "DEBIAN_FRONTEND": "noninteractive"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-playwright.playwright"
+      ]
+    }
+  },
+  "forwardPorts": [],
+  "mounts": [],
+  "runArgs": ["--init"]
+}

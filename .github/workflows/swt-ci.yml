@@ -1,0 +1,95 @@
+name: SWT CI (autonomous)
+
+# Runs the SWT autonomous agent inside the project devcontainer. The agent
+# reads a task description, makes the change, runs Playwright, and opens a PR
+# back into this repo for human review.
+#
+# Triggered manually so a human always picks the task. Add `issues: types:
+# [labeled]` triggers later if you want labels on issues to kick this off.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task description for the agent (markdown ok)"
+        required: true
+        type: string
+      base_branch:
+        description: "Base branch for the PR"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write       # push the swt-ci/* feature branch
+  pull-requests: write  # open the PR
+
+jobs:
+  swt-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.48.0-jammy
+    env:
+      SWT_CI_MODE: "true"
+      SWT_CI_TASK: ${{ inputs.task }}
+      SWT_CI_BASE_BRANCH: ${{ inputs.base_branch }}
+      SWT_CI_ARTIFACT_DIR: ${{ github.workspace }}/.swt-ci-artifacts
+      # gh + Octokit pick this up automatically. Never echo it.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Anthropic API key for Claude Code, scoped to the workflow.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.base_branch }}
+
+      - name: Checkout Project-SWT
+        uses: actions/checkout@v4
+        with:
+          repository: T5-labs/Project-SWT
+          path: Project-SWT
+          ref: main
+
+      - name: Install Node + Claude Code
+        run: |
+          node --version
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Install gh
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            type -p curl >/dev/null || apt-get install -y curl
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              | tee /etc/apt/sources.list.d/github-cli.list
+            apt-get update && apt-get install -y gh
+          fi
+          gh --version
+
+      - name: Install project deps
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f pnpm-lock.yaml ]; then npm i -g pnpm && pnpm install --frozen-lockfile
+          elif [ -f yarn.lock ]; then npm i -g yarn && yarn install --frozen-lockfile
+          fi
+
+      - name: Run SWT agent
+        env:
+          SWT_DIR: ${{ github.workspace }}/Project-SWT
+        run: |
+          mkdir -p "$SWT_CI_ARTIFACT_DIR"
+          bash "$SWT_DIR/deploy.sh" --ci
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swt-ci-artifacts-${{ github.run_id }}
+          path: ${{ env.SWT_CI_ARTIFACT_DIR }}
+          if-no-files-found: warn

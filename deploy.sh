@@ -1038,6 +1038,7 @@ REMOTE=false
 MODE_SUPPORT=false
 MODE_BRANCH=false
 MODE_MONITOR=false
+MODE_CI=false
 # Engine = the Claude Code-compatible binary swt will exec. Not read from env
 # (no env override per design) — only the --engine flag overrides this default.
 SWT_ENGINE="claude"
@@ -1051,6 +1052,7 @@ for arg in "$@"; do
         --monitor) _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --monitor" ;;
         --branch)  _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --branch" ;;
         --support) _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --support" ;;
+        --ci)      _PREPASS_HAS_RUN_FLAGS=true; _PREPASS_RUN_FLAGS_LIST="${_PREPASS_RUN_FLAGS_LIST} --ci" ;;
     esac
 done
 
@@ -1090,6 +1092,10 @@ for arg in "$@"; do
             echo "                         and categorize / auto-resolve / surface them per policy."
             echo "                         Requires --branch and Bitbucket integration. Mutually"
             echo "                         exclusive with --support."
+            echo "  swt --ci               Autonomous CI mode — runs in a devcontainer / GitHub"
+            echo "                         Actions. Loads CLAUDE-CI.md, the CI agent variants can"
+            echo "                         commit/push/open PRs. Mutually exclusive with --branch,"
+            echo "                         --support, --monitor."
             echo "  swt --remote           Enable remote control (can combine with other flags)"
             echo "  swt --engine=<binary>  Claude Code-compatible engine to launch (default: claude)."
             echo "                         Examples: --engine=claude-rc, --engine=/path/to/custom-build."
@@ -1369,6 +1375,9 @@ SECRETS_EOF
         --monitor)
             MODE_MONITOR=true
             ;;
+        --ci)
+            MODE_CI=true
+            ;;
         --engine=*)
             # Already captured in the pre-pass — no-op here so it isn't flagged
             # as unknown.
@@ -1477,6 +1486,16 @@ fi
 
 if [ "$MODE_MONITOR" = true ] && [ "$MODE_BRANCH" != true ]; then
     echo "[swt] --monitor requires --branch (e.g., swt --branch --monitor)" >&2
+    exit 2
+fi
+
+# --ci is the autonomous CI/devcontainer mode. It inverts the human-mode hard
+# rules (the CI agent CAN commit, push, and open PRs) and skips the human-gated
+# scaffolding (Obsidian notes, Bitbucket monitor, clipboard reads). It is
+# mutually exclusive with every other run mode — if you're in CI, you are not
+# also in branch/support/monitor.
+if [ "$MODE_CI" = true ] && { [ "$MODE_BRANCH" = true ] || [ "$MODE_SUPPORT" = true ] || [ "$MODE_MONITOR" = true ]; }; then
+    echo "[swt] --ci is mutually exclusive with --branch/--support/--monitor" >&2
     exit 2
 fi
 
@@ -1605,6 +1624,14 @@ if [ "$MODE_MONITOR" = true ]; then
     export SWT_MONITOR_MODE="true"
 else
     export SWT_MONITOR_MODE="false"
+fi
+
+# Export CI mode flag — true only when --ci was passed this boot. Read by the
+# CI-mode TPM (CLAUDE-CI.md) to confirm autonomous operation.
+if [ "$MODE_CI" = true ]; then
+    export SWT_CI_MODE="true"
+else
+    export SWT_CI_MODE="false"
 fi
 
 # Incremental discovery: for any app whose repo path is null in support.apps,
@@ -1917,6 +1944,12 @@ if [ "$SWT_MONITOR_MODE" = "true" ]; then
     echo "[swt] ✓ Monitor mode: active (polling every ${_MONITOR_INTERVAL}s)"
 fi
 
+# CI-mode confirmation — only printed when --ci was passed this boot. CI mode
+# loads CLAUDE-CI.md (autonomous operation) instead of CLAUDE.md.
+if [ "$SWT_CI_MODE" = "true" ]; then
+    echo "[swt] ✓ CI mode: active (autonomous, CLAUDE-CI.md)"
+fi
+
 # Surface the engine selection only when it differs from the default — keeps
 # the boot log quiet for the common case.
 if [ "$SWT_ENGINE" != "claude" ]; then
@@ -1929,7 +1962,15 @@ echo ""
 
 # Launch claude with TPM identity loaded from CLAUDE.md + Project-SWT file access
 # cwd stays as the user's work repo
-CLAUDE_ARGS=(--dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system-prompt-file "$SWT_DIR/CLAUDE.md")
+# CI mode loads CLAUDE-CI.md instead of CLAUDE.md. The two prompts diverge on
+# the most fundamental rules (git writes, file deletes, Obsidian) so they live
+# as separate files rather than conditionals inside one prompt.
+if [ "$MODE_CI" = true ]; then
+    SWT_PROMPT_FILE="$SWT_DIR/CLAUDE-CI.md"
+else
+    SWT_PROMPT_FILE="$SWT_DIR/CLAUDE.md"
+fi
+CLAUDE_ARGS=(--dangerously-skip-permissions --add-dir "$SWT_DIR" --append-system-prompt-file "$SWT_PROMPT_FILE")
 
 if [ "$REMOTE" = true ]; then
     CLAUDE_ARGS+=(--remote-control)
