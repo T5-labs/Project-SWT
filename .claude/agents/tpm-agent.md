@@ -51,6 +51,7 @@ Print each status line as you complete it using this exact format — `[swt]` pr
    - `SWT_LPRUN_PATH` — LINQPad CLI runner path (for database queries)
    - `SWT_PLAYWRIGHT_HEADLESS` — Playwright headless mode (`true`/`false`)
    - `SWT_IS_WSL` — `true` if running in WSL, `false` if Git Bash
+   - `SWT_SUPPORT_SCRIPT_LANGUAGE` — global support-mode script language preference (`sql` or `csharp`; `sql` if unset)
    - Print: `[swt] ✓ Config loaded (swt_settings.json)` or `[swt] ✗ Config missing, using defaults`
 
 3. Read core allocation from env vars: `SWE_AGENT_COUNT` (default: 3), `SWE_EFFICIENCY_CORES` (default: 1), `SWE_PERFORMANCE_CORES` (default: 2), `QA_AGENT_COUNT` (default: 1).
@@ -514,14 +515,14 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 **Path resolution.** `deploy.sh` resolves the file location (typically the user's Windows home directory) and exports it as `SWT_SETTINGS_PATH`. The legacy env vars `SWT_FEEDBACK_PATH` and `SWT_SUPPORT_PATH` are preserved for backward compatibility — they now point at the same file as `SWT_SETTINGS_PATH`. You do NOT compute paths yourself.
 
 **Top-level schema keys:**
-- `_schema` — schema version number (currently `5`). Future migrations bump this.
+- `_schema` — schema version number (currently `6`). Future migrations bump this.
 - `team` — core allocation (`swe_count`, `swe_efficiency_cores`, `swe_performance_cores`, `qa_count`).
 - `atlassian` — `cloud_id`, `site`, `board_id`, `board_url`.
 - `paths` — `obsidian_base`, `edge_profile`, `lprun`.
 - `playwright` — `headless` (boolean).
 - `database` — `enabled` (boolean), `allowlist` (object mapping project key → connection name).
 - `feedback` — `enabled` (boolean), `entries[]` (array of `{"date": "YYYY-MM-DD", "text": "..."}`).
-- `support` — `enabled` (boolean), `apps{}` (object keyed by app name → path-or-null). Curated search roots used for boot-time discovery are hardcoded in `deploy.sh` and are not stored here.
+- `support` — `enabled` (boolean), `apps{}` (object keyed by app name → path-or-null), `script_language` (string, `"sql"` or `"csharp"` — controls script emission in `--support` sessions; default `"sql"`), `app_overrides{}` (object keyed by app name → `{"script_language": "sql"|"csharp"}` — per-app overrides; empty by default). Curated search roots used for boot-time discovery are hardcoded in `deploy.sh` and are not stored here.
 - `bitbucket` — Bitbucket integration toggle and flavor (cloud/server). Workspace, email, and token live in the user's secrets file (`${SWT_SECRETS_PATH}`). `enabled` (boolean), `flavor` (string, `cloud`), `auth.token_source` (string, e.g. `env:BITBUCKET_TOKEN`). The literal token, the email, and the workspace slug never live in this file — they're user-specific account data paired with the credentials.
 - `statusline` — statusline display toggle. `enabled` (boolean).
 - `monitor` — monitor mode configuration. `enabled` (boolean), `interval_seconds` (int), `risky_change_file_threshold` (int), `categories` (object keyed by category name), `counter_response_prompt` (string).
@@ -538,7 +539,7 @@ If the user just closes the terminal without saying goodbye, you won't get a cha
 
 Either way: **never lose existing data**. If you're unsure the edit will land cleanly, prefer Read+Write over Edit.
 
-**Schema versioning.** `_schema: 5` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map; v2 → v3 adds the optional `bitbucket` block with `enabled: false` defaults; v3 → v4 adds the `monitor` block with all defaults seeded and bumps `_schema` to `4`; v4 → v5 adds the `review` block with `enabled: true`, the default `comment_posting_prompt`, and `min_rating_to_post: 1` seeded, then bumps `_schema` to `5`) and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting (e.g., `${SWT_SETTINGS_PATH}.v4.bak` for the v4 → v5 migration), so the user always has a recovery path. Future schema bumps follow the same pattern.
+**Schema versioning.** `_schema: 6` is the current version. If you read a file with a different schema version than you expect, tell the user and let them decide before writing. `deploy.sh` handles forward migrations (e.g., v1 → v2 collapses `support.apps[]` + `support.search_roots[]` + `support.repos{}` into a single `support.apps{}` map; v2 → v3 adds the optional `bitbucket` block with `enabled: false` defaults; v3 → v4 adds the `monitor` block with all defaults seeded and bumps `_schema` to `4`; v4 → v5 adds the `review` block with `enabled: true`, the default `comment_posting_prompt`, and `min_rating_to_post: 1` seeded, then bumps `_schema` to `5`; v5 → v6 adds `support.script_language: "sql"` and `support.app_overrides: {}` to the support block, then bumps `_schema` to `6`) and writes a `${SWT_SETTINGS_PATH}.<old-version>.bak` backup before rewriting (e.g., `${SWT_SETTINGS_PATH}.v5.bak` for the v5 → v6 migration), so the user always has a recovery path. Future schema bumps follow the same pattern.
 
 **One-time migration messaging.** On first boot after the upgrade to `swt_settings.json`, `deploy.sh` migrates any existing `swt_feedback.md` / `swt_support.md` content into the new JSON and sets `SWT_SETTINGS_MIGRATED=true`. TPM checks this env var at step 13 of the Startup Sequence and surfaces the migration message on that boot only — see step 13 for the exact check and message. If `SWT_SETTINGS_MIGRATED` is not `"true"`, do not surface this message. Schema bumps within `swt_settings.json` (e.g., v1 → v2) are handled by `deploy.sh` quietly and leave a `${SWT_SETTINGS_PATH}.v1.bak` backup in place.
 
@@ -610,6 +611,41 @@ A session-modality dedicated to answering support questions across the apps the 
 ```
 
 An entry in `support.apps` is **mapped** if its value is a non-null, non-empty string. `null` (or absent) means unmapped — `deploy.sh` will attempt re-discovery on the next `--support` boot. The legacy v1 shape (separate `apps[]`, `search_roots[]`, and `repos{}` keys) is auto-migrated by `deploy.sh`, which leaves a `${SWT_SETTINGS_PATH}.v1.bak` backup behind on first migration.
+
+**Investigative script language (`support.script_language`).** Controls how TPM generates investigative scripts when answering support questions during `--support` sessions. This setting is **only active in `--support` mode** — it has no effect in `--branch` sessions.
+
+Allowed values:
+- `"sql"` (default) — emit raw T-SQL queries ready to paste into LINQPad's SQL mode or SSMS.
+- `"csharp"` — emit LINQPad C# script bodies using the typed DataContext (e.g., `WorkOrder.Where(w => w.Status == "Open").Dump();`), providing EF-style readability and IntelliSense. `"linqpad"` is accepted as a synonym for `"csharp"` — normalize it to `"csharp"` when you read it (in-memory only — do not rewrite the file).
+
+The env var `SWT_SUPPORT_SCRIPT_LANGUAGE` exposes the current global value (exported by `deploy.sh` at boot; falls back to `"sql"` if unset or unreadable).
+
+**Per-app override (`support.app_overrides`).** A sibling map to `support.apps` — uses Option A (separate object) to avoid changing the string-or-null shape of `support.apps`. Per-app overrides live under `support.app_overrides.<APP>.script_language`. If present for the active app, this takes precedence over the global `support.script_language`; if absent, fall back to the global setting.
+
+```json
+{
+  "support": {
+    "enabled": true,
+    "apps": {
+      "CMMS": "/mnt/c/Users/aarbuckle/source/repos/CMMS",
+      "HITS": null
+    },
+    "script_language": "sql",
+    "app_overrides": {
+      "CMMS": {"script_language": "csharp"}
+    }
+  }
+}
+```
+
+**Lookup order when generating an investigative script:**
+1. Check `support.app_overrides.<ACTIVE_APP>.script_language` in `swt_settings.json` — use it if present and valid.
+2. Fall back to the global `support.script_language` (or `SWT_SUPPORT_SCRIPT_LANGUAGE` env var).
+3. If neither is set or the value is invalid, default to `"sql"`.
+
+**Invalid values.** If `script_language` has an unrecognized value at read time (anything other than `"sql"`, `"csharp"`, or `"linqpad"`), default to `"sql"` and note to the user: "Unrecognized script_language value '{value}' — defaulting to sql. Update support.script_language in swt_settings.json to 'sql' or 'csharp'."
+
+**Updating the setting mid-session.** The user can ask TPM to flip this conversationally ("switch to C# scripts for this session" or "use SQL for CMMS specifically"). For global changes, update `support.script_language` via Read+Edit. For per-app changes, update or create `support.app_overrides.<APP>.script_language`. Keep edits surgical.
 
 **Boot-time auto-discovery (only when `SWT_SUPPORT_MODE=true`).** When the user invokes `swt --support`, `deploy.sh` walks `support.apps` and, for every entry whose value is `null`, attempts to locate the project on disk. Discovery rules:
 
@@ -1676,7 +1712,7 @@ The user may take a screenshot and ask you to look at it (e.g., "look at my clip
 
 ## Statusline Display
 
-The Claude Code statusline renders a single line beneath the prompt on every turn. SWT plugs into it to show the current version and (when available) the cumulative session token spend plus current context-window usage, so the user always knows which SWT they're talking to, how many tokens they've consumed this session, and how full the context window is getting.
+The Claude Code statusline renders a single line beneath the prompt on every turn. SWT plugs into it to show the current version and (when available) the cumulative session token spend, current context-window usage, and the 5-hour rolling-window usage percentage, so the user always knows which SWT they're talking to, how many tokens they've consumed this session, how full the context window is getting, and how much of their 5-hour quota has been used.
 
 **The script.** `${SWT_DIR}/scripts/swt-statusline.sh` is a bash script that reads the harness payload from stdin (JSON), reads `swt_settings.json` to check whether the statusline is enabled, and emits a single line on stdout. Dependencies are bash + python3 — `jq` is NOT used (it's not installed in WSL). The script never fails: every error path falls back silently to the short form.
 
@@ -1704,14 +1740,20 @@ This is a one-time install step done with the `update-config` skill or a direct 
 
 **Behavior matrix.**
 
+Each statline segment renders independently based on whether its source field is present in the payload. Segments are joined with ` · ` (middle dot). The ` │ ` (vertical bar) separator appears only when at least one segment is present. Any percentage segment ≥85% renders in red (ANSI). If no segments are present, only `[SWT vX.Y.Z]` is emitted. JSON parse failures or empty stdin fall back to version-only silently.
+
 | Condition | Output |
 |-----------|--------|
-| `statusline.enabled = true` AND `context_window.{total_input_tokens, total_output_tokens, used_percentage}` present in payload | `[SWT vX.Y.Z │ 142k · 62%]` (context % renders in red when ≥85%) |
-| `statusline.enabled = true` AND `context_window` absent (early in session before the first API response, or environments that don't pass `context_window` in the payload) | `[SWT vX.Y.Z]` |
+| `statusline.enabled = true`, all three segments present (tokens, context %, 5h %) | `[SWT vX.Y.Z │ 142k · 62% · 5h 41%]` |
+| `statusline.enabled = true`, tokens + context % only (5h absent) | `[SWT vX.Y.Z │ 142k · 62%]` |
+| `statusline.enabled = true`, tokens + 5h only (context % absent) | `[SWT vX.Y.Z │ 142k · 5h 41%]` |
+| `statusline.enabled = true`, 5h only (no context_window at all) | `[SWT vX.Y.Z │ 5h 41%]` |
+| `statusline.enabled = true`, tokens only | `[SWT vX.Y.Z │ 142k]` |
+| `statusline.enabled = true`, no segments present | `[SWT vX.Y.Z]` |
 | `statusline.enabled = false` | `[SWT vX.Y.Z]` |
 | `swt_settings.json` unreadable or any error in the script | `[SWT vX.Y.Z]` (silent fallback — no error text leaks) |
 
-**Data source.** Cumulative session tokens come from `context_window.total_input_tokens + context_window.total_output_tokens`. Context percentage comes from `context_window.used_percentage` — this is the value to use for accurate context state (it's computed from input + cache_creation + cache_read and matches what `/context` shows), rather than deriving a percentage from the cumulative totals. `context_window` is plan-tier-agnostic — it's session token tracking, so Pro/Max plan status is not a factor. The version-only fallback simply means the harness hasn't yet sent a payload with `context_window` populated (typically only the very first prompt of a session).
+**Data source.** Cumulative session tokens come from `context_window.total_input_tokens + context_window.total_output_tokens`. Context percentage comes from `context_window.used_percentage` — this is the value to use for accurate context state (it's computed from input + cache_creation + cache_read and matches what `/context` shows), rather than deriving a percentage from the cumulative totals. The 5-hour rolling-window percentage comes from `rate_limits.five_hour.used_percentage` — this is a float 0–100 reflecting consumption against the rolling 5-hour quota on Pro/Max plans. It is absent before the first API response in a session and may be missing for non-Pro/Max accounts; when absent the 5h segment is silently omitted. `context_window` is plan-tier-agnostic — it's session token tracking, so Pro/Max plan status is not a factor for that field. The version-only fallback simply means the harness hasn't yet sent a payload with `context_window` populated (typically only the very first prompt of a session).
 
 **Conversational enable/disable.** When the user says "turn on the statusline", "show my usage in the statusline", "turn off the statusline", or similar — flip `statusline.enabled` in `swt_settings.json` via Read+Write (preserve the rest of the file) and confirm the change back to the user. If the `statusline` block doesn't exist yet, add it. The change takes effect on the next prompt the harness renders — no restart needed.
 

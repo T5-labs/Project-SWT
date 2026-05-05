@@ -515,7 +515,7 @@ for raw in os.environ.get('SUPPORT_MD', '').splitlines():
         repos[app] = val
 
 doc = {
-    "_schema": 5,
+    "_schema": 6,
     "team": {
         "swe_count": _int(os.environ.get('SEED_SWE_COUNT'), 3),
         "swe_efficiency_cores": _int(os.environ.get('SEED_SWE_EFF'), 1),
@@ -547,6 +547,8 @@ doc = {
     "support": {
         "enabled": _bool(os.environ.get('SEED_SUPPORT_ENABLED'), True),
         "apps": repos,
+        "script_language": "sql",
+        "app_overrides": {},
     },
     "bitbucket": {
         "enabled": False,
@@ -598,7 +600,7 @@ PY
 
 _ensure_settings_file || true
 
-# ── Schema Migration (v1 → v2 → v3 → v4 → v5) ─────────────────────
+# ── Schema Migration (v1 → v2 → v3 → v4 → v5 → v6) ─────────────────────
 # v2 collapses support.{apps[], search_roots[], repos{}} into a single
 # support.apps{} map (APP → path|null) and bumps _schema to 2.
 # v3 adds the bitbucket block (enabled/flavor/auth) after support and bumps
@@ -607,6 +609,9 @@ _ensure_settings_file || true
 # after statusline and bumps _schema to 4. Powers `swt --branch --monitor`.
 # v5 adds the review block (enabled/comment_posting_prompt/min_rating_to_post)
 # after monitor and bumps _schema to 5. Powers the review-mode `post` verb.
+# v6 adds support.script_language ("sql" default) and support.app_overrides{}
+# to the support block and bumps _schema to 6. Powers per-mode script emission
+# in --support sessions.
 # Runs in-place on an existing settings file; no-op if already at the latest
 # schema, if the file is missing, or if the JSON is malformed. A v1 file is
 # migrated through every step in a single boot. Never fails the boot.
@@ -924,13 +929,58 @@ if needs_v5:
     migrated_any = True
     schema = data.get('_schema')
 
+# ── v5 → v6 ──────────────────────────────────────────────────────
+# Detect v5: _schema == 5. Always run if at v5 so a pre-seeded partial
+# 'support' block is deep-merged with defaults rather than silently skipped.
+needs_v6 = (schema == 5)
+
+if needs_v6:
+    # Backup the v5 file before mutating (only if no backup exists yet).
+    backup_path_v5 = path + '.v5.bak'
+    if not os.path.exists(backup_path_v5):
+        try:
+            shutil.copy2(path, backup_path_v5)
+        except Exception as e:
+            print(f"[swt] ⚠ swt_settings.json: backup failed ({e}), continuing migration")
+
+    support_defaults = OrderedDict()
+    support_defaults['enabled'] = True
+    support_defaults['apps'] = OrderedDict()
+    support_defaults['script_language'] = 'sql'
+    support_defaults['app_overrides'] = OrderedDict()
+
+    # Deep-merge defaults onto any pre-existing user 'support' values so
+    # a partially pre-seeded block gets its missing keys filled in.
+    existing_support = data.get('support', OrderedDict())
+    support_block = _deep_merge_defaults(support_defaults, existing_support)
+
+    # Replace the support block in-place (no key-order rewrite needed —
+    # support already exists in all v2+ files; just update its value).
+    new_data = OrderedDict()
+    for k, v in data.items():
+        if k == 'support':
+            new_data[k] = support_block
+        else:
+            new_data[k] = v
+
+    new_data['_schema'] = 6
+    data = new_data
+
+    if not _atomic_write(data):
+        print('[swt] ⚠ swt_settings.json: write failed during migration, skipping')
+        sys.exit(0)
+
+    print(f"[swt] migrated swt_settings.json schema 5 → 6 (backup: {backup_path_v5})")
+    migrated_any = True
+    schema = data.get('_schema')
+
 if migrated_any:
     print('__SWT_SCHEMA_MIGRATED__')
 elif schema is None or not isinstance(schema, int):
     print('[swt] ⚠ swt_settings.json: schema unreadable ({}), skipping migration. To fix: edit _schema to a number, or delete swt_settings.json to re-seed from defaults.'.format(repr(schema)))
-elif schema > 5:
-    print('[swt] ⚠ swt_settings.json: schema {} is newer than supported 5 — running anyway, but some features may not work.'.format(schema))
-# else: schema == 5 → silent no-op
+elif schema > 6:
+    print('[swt] ⚠ swt_settings.json: schema {} is newer than supported 6 — running anyway, but some features may not work.'.format(schema))
+# else: schema == 6 → silent no-op
 PY
 }
 
@@ -1597,6 +1647,14 @@ if [ "$MODE_SUPPORT" = true ]; then
 else
     export SWT_SUPPORT_MODE="false"
 fi
+
+# Export the global script language preference for --support sessions.
+# TPM reads per-app overrides from support.app_overrides.<APP>.script_language
+# directly from swt_settings.json when needed; only the global default is
+# exported here. Falls back to "sql" if the key is missing or unreadable.
+_support_script_lang="$(_json_get "$SWT_SETTINGS_PATH" support.script_language)"
+export SWT_SUPPORT_SCRIPT_LANGUAGE="${_support_script_lang:-sql}"
+unset _support_script_lang
 
 # Export monitor mode flag — true only when --monitor was passed this boot.
 # TPM reads the rest of the monitor config (interval, categories, prompts)

@@ -13,13 +13,13 @@ A multi-agent development team you deploy from any repo to collaboratively work 
 - **Preview mode** — Dry-run code changes for review before any files are touched
 - **Review mode** — Auto-detects colleague branches at startup and deploys 3 SWEs in parallel (security, logic, quality lenses) to hunt for vulnerabilities with ranked findings; type `post <ordinals>` to share selected findings as Bitbucket PR comments with a confirmation gate
 - **Fresh Branch Planning** — Auto-detects zero-commit branches on `swt --branch` and deploys 3 SWEs in parallel (architecture, implementation, test-strategy lenses) to plan the ticket from its Jira AC, with the plan logged to Obsidian notes
-- **Support Mode** — Multi-app support sessions via `swt --support`. Auto-discovers configured app repos, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate.
+- **Support Mode** — Multi-app support sessions via `swt --support`. Auto-discovers configured app repos, dispatches 3 SWEs in parallel (Reproduction/Code path/Regression lenses) to investigate. `support.script_language` controls whether investigative scripts are emitted as raw T-SQL (`"sql"`, default) or LINQPad C# (`"csharp"`); per-app overrides via `support.app_overrides{}`.
 - **Monitor Mode** — Watches a Bitbucket PR for incoming comments (`swt --branch --monitor`). Classifies each comment, auto-resolves or surfaces per policy, and posts counter-responses after you push. The ticket is auto-detected from the current git branch name. Requires Bitbucket integration.
 - **QA verification** — Automated code review of SWE changes plus Playwright test generation
 - **Pre-PR checklist** — CodeRabbit-aware checks (secrets, dead code, null checks, unused imports)
 - **Clipboard image reading** — Screenshot your screen, say "check my clipboard", and the agent sees it via Claude Vision
 - **Database access** — Read-only SQL queries via LINQPad for schema exploration and data inspection
-- **Statusline display** — Claude Code statusline shows your SWT version and (when available) cumulative session tokens + current context-window usage when enabled
+- **Statusline display** — Claude Code statusline shows your SWT version and (when available) cumulative session tokens, current context-window usage, and 5-hour rolling-window quota when enabled; each segment renders independently
 - **Bitbucket integration** — Optional opt-in REST access for PR / pipeline / comment queries via secure local secrets file. See [`docs/bitbucket-integration.md`](docs/bitbucket-integration.md) for the architecture and decisions reference.
 - **Cross-platform** — Works in both Git Bash and WSL with automatic path translation and a single shared launcher
 - **One-command setup** — `deploy.sh --setup` configures everything (launcher, PATH, platform detection)
@@ -102,7 +102,13 @@ If you prefer running SWT from WSL instead of Git Bash:
    ```
    This shares auth between Git Bash and WSL — no separate login needed. If you don't have Claude Code authenticated on Windows yet, run `claude auth login` from Git Bash first, then create the symlink.
 
-5. **Run setup** to install the `swt` launcher:
+5. **Configure the git credential helper.** Git for Windows is typically installed at `C:\Users\<you>\AppData\Local\Programs\Git\` (per-user install) — not `C:\Program Files\Git\`. WSL git won't have a credential helper configured by default, so HTTPS `git pull` / `git push` will hang on a username prompt. Point WSL at the Windows GCM binary so it shares the credential cache with Git for Windows:
+   ```bash
+   git config --global credential.helper "/mnt/c/Users/<your-windows-username>/AppData/Local/Programs/Git/mingw64/bin/git-credential-manager.exe"
+   ```
+   Replace `<your-windows-username>` with your Windows account name. If your Git for Windows install lives somewhere else (e.g. system-wide at `C:\Program Files\Git\`), point at that path instead — and beware spaces in the path: they can break the helper unless properly quoted in `~/.gitconfig`. Verify with `git pull` in any HTTPS-cloned repo — it should succeed without prompting (a one-time GCM browser auth window may pop the first time).
+
+6. **Run setup** to install the `swt` launcher:
 
    Find where your C: drive is mounted and run setup:
    ```bash
@@ -114,7 +120,7 @@ If you prefer running SWT from WSL instead of Git Bash:
 
    This creates `~/bin/swt` (a cross-platform launcher that works in both Git Bash and WSL), makes it executable, and adds `~/bin` to your PATH in `~/.bashrc` if needed.
 
-6. **Reload your shell and verify:**
+7. **Reload your shell and verify:**
    ```bash
    source ~/.bashrc
    swt --help
@@ -122,6 +128,17 @@ If you prefer running SWT from WSL instead of Git Bash:
 
 **Notes:**
 - **Auth in WSL:** `claude auth login` hangs in WSL because the OAuth browser callback can't reach the WSL environment. The workaround is to symlink the Windows-side credentials file (step 4 above). If the credentials expire, re-authenticate from Git Bash and the symlink picks up the new token automatically.
+- **Auto-updating Claude Code on shell start (optional).** Claude Code self-updates, but if you want to be sure you're always on latest, add a guarded check to `~/.bashrc` that only reinstalls when a new version has been published — this avoids paying the full sudo + npm install cost on every shell launch:
+  ```bash
+  LATEST=$(npm view @anthropic-ai/claude-code version 2>/dev/null)
+  CURRENT=$(npm ls -g --depth=0 @anthropic-ai/claude-code 2>/dev/null | awk -F@ '/claude-code/{print $NF}')
+  if [ -n "$LATEST" ] && [ "$LATEST" != "$CURRENT" ]; then
+    echo "[bashrc] Updating Claude Code: ${CURRENT:-not installed} → $LATEST"
+    time sudo npm install -g @anthropic-ai/claude-code@latest
+  fi
+  unset LATEST CURRENT
+  ```
+  Adds ~1s to shell startup (two registry checks) but skips the 10–30s reinstall on most shells. Avoid the unguarded form `sudo npm install -g @anthropic-ai/claude-code@latest` — it pays the full sudo + network + install cost on every shell launch.
 - WSL does **not** need the `CLAUDE_CODE_GIT_BASH_PATH` env var — that's Git Bash only
 - `deploy.sh` auto-detects WSL and translates Windows paths from `swt_settings.json` to the correct Linux path format. It detects your actual C: drive mount point automatically (handles both `/mnt/c` and `/mnt/host/c` and other non-standard mount points).
 - The `--setup` launcher is cross-platform — if you run `--setup` from Git Bash, the same `~/bin/swt` file works in WSL too (and vice versa), since WSL inherits the Windows PATH.
@@ -179,17 +196,17 @@ Top-level keys and what they contain:
 
 | Key | Description |
 |-----|-------------|
-| `_schema` | Schema version for future migrations (currently 5) |
+| `_schema` | Schema version for future migrations (currently 6) |
 | `team` | Agent core counts and limits (`swe_count`, `swe_performance_cores`, `swe_efficiency_cores`, `qa_count`) |
 | `atlassian` | Jira cloud ID, site URL, board ID and URL |
 | `paths` | Obsidian vault path, Edge browser profile path, LINQPad runner path |
 | `playwright` | Playwright settings (`headless` toggle) |
 | `database` | Database toggle and `allowlist` map of project keys to LINQPad connection names |
 | `feedback` | Feedback log toggle and entries |
-| `support` | Support mode `enabled` flag and `apps{}` map of app name → repo path or `null` (auto-discovered on boot) |
+| `support` | Support mode `enabled` flag, `apps{}` map of app name → repo path or `null` (auto-discovered on boot), `script_language` (`"sql"` default / `"csharp"`) for investigative script output, and `app_overrides{}` for per-app `script_language` overrides |
 | `monitor` | Monitor mode settings — polling interval, file threshold, per-category policies, counter-response prompt |
 | `review` | Review mode posting settings — `enabled` toggle, `comment_posting_prompt`, `min_rating_to_post` threshold |
-| `statusline` | Statusline display config (`enabled` flag — shows SWT version + cumulative session tokens + context-window % in Claude Code) |
+| `statusline` | Statusline display config (`enabled` flag — shows SWT version + cumulative session tokens + context-window % + 5-hour rolling-window % in Claude Code) |
 | `bitbucket` | Bitbucket Cloud integration toggle and flavor (`enabled`, `flavor`). Off by default. Workspace/email/token live in the user's secrets file (`${SWT_SECRETS_PATH}`). |
 
 To edit a value: open `swt_settings.json` directly in any text editor, or ask TPM *"update my Obsidian path to X"* and TPM will make the edit for you.
@@ -517,7 +534,7 @@ Project-SWT/
 ├── scripts/
 │   ├── bb-curl.sh               # Bitbucket REST wrapper (sources secrets locally, never exposes token)
 │   ├── clipboard-read.ps1       # Saves Windows clipboard image to temp file
-│   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + session tokens + context %)
+│   └── swt-statusline.sh        # Claude Code statusline hook (SWT version + session tokens + context % + 5h rolling %)
 ├── .claude/
 │   ├── config/
 │   │   └── swt.yml               # Deprecated seed template — used only on first boot

@@ -43,13 +43,14 @@ payload="$(cat 2>/dev/null)" || payload=""
 
 # --- 3. Ask python3 to do all the JSON work in one shot.
 # Inputs via env: SETTINGS_FILE, PAYLOAD.
-# Outputs on stdout: "<enabled>|<tokens_str_or_empty>|<pct_or_empty>"
+# Outputs on stdout: "<enabled>|<tokens_str_or_empty>|<pct_or_empty>|<five_hour_pct_or_empty>"
 parsed="$(SETTINGS_FILE="$SETTINGS_FILE" PAYLOAD="$payload" python3 - <<'PY' 2>/dev/null
 import json, os, sys
 
 enabled = "0"
 tokens_str = ""
 pct = ""
+five_hour_pct = ""
 
 # settings -> statusline.enabled
 try:
@@ -71,6 +72,7 @@ def fmt_tokens(n):
     return f"{n / 1_000_000:.1f}M"
 
 # stdin payload -> context_window.{total_input_tokens, total_output_tokens, used_percentage}
+#              -> rate_limits.five_hour.used_percentage
 raw = os.environ.get("PAYLOAD", "")
 if raw.strip():
     try:
@@ -91,8 +93,22 @@ if raw.strip():
                 pct = str(p_int)
     except Exception:
         pass
+    try:
+        p = json.loads(raw)
+        rl = p.get("rate_limits") if isinstance(p, dict) else None
+        if isinstance(rl, dict):
+            fh = rl.get("five_hour")
+            if isinstance(fh, dict):
+                fh_up = fh.get("used_percentage")
+                if isinstance(fh_up, (int, float)):
+                    fh_int = int(round(fh_up))
+                    if fh_int < 0:
+                        fh_int = 0
+                    five_hour_pct = str(fh_int)
+    except Exception:
+        pass
 
-sys.stdout.write(f"{enabled}|{tokens_str}|{pct}")
+sys.stdout.write(f"{enabled}|{tokens_str}|{pct}|{five_hour_pct}")
 PY
 )"
 
@@ -100,15 +116,42 @@ PY
 enabled="${parsed%%|*}"
 rest="${parsed#*|}"
 tokens_str="${rest%%|*}"
-pct="${rest#*|}"
+rest="${rest#*|}"
+pct="${rest%%|*}"
+five_hour_pct="${rest#*|}"
 [ "$enabled" != "1" ] && enabled="0"
 
 # --- 4. Format the output line ---
-if [ "$enabled" = "1" ] && [ -n "$tokens_str" ] && [ -n "$pct" ]; then
-    if [ "$pct" -ge 85 ] 2>/dev/null; then
-        printf '[SWT v%s │ %s · \033[31m%s%%\033[0m]' "$version" "$tokens_str" "$pct"
+# Each segment is independent — gates on its own source field being non-empty.
+# Segments are joined with ' · ' (U+00B7 middle dot). The ' │ ' (U+2502 vertical
+# bar) separator appears only when at least one segment is present.
+if [ "$enabled" = "1" ]; then
+    parts=()
+    [ -n "$tokens_str" ] && parts+=("$tokens_str")
+    if [ -n "$pct" ]; then
+        if [ "$pct" -ge 85 ] 2>/dev/null; then
+            parts+=("$(printf '\033[31m%s%%\033[0m' "$pct")")
+        else
+            parts+=("$(printf '%s%%' "$pct")")
+        fi
+    fi
+    if [ -n "$five_hour_pct" ]; then
+        if [ "$five_hour_pct" -ge 85 ] 2>/dev/null; then
+            parts+=("$(printf '5h \033[31m%s%%\033[0m' "$five_hour_pct")")
+        else
+            parts+=("$(printf '5h %s%%' "$five_hour_pct")")
+        fi
+    fi
+    if [ "${#parts[@]}" -gt 0 ]; then
+        # Join parts with ' · ' (middle dot U+00B7, octal \302\267)
+        joined="${parts[0]}"
+        for i in "${!parts[@]}"; do
+            [ "$i" -eq 0 ] && continue
+            joined="${joined} $(printf '\302\267') ${parts[$i]}"
+        done
+        printf '[SWT v%s \342\224\202 %s]' "$version" "$joined"
     else
-        printf '[SWT v%s │ %s · %s%%]' "$version" "$tokens_str" "$pct"
+        printf '[SWT v%s]' "$version"
     fi
 else
     printf '[SWT v%s]' "$version"

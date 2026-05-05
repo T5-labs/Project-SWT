@@ -16,7 +16,7 @@ This document is the reference for SWT's Bitbucket Cloud integration: a `bb-curl
 | Token storage | `${SWT_SECRETS_PATH}` (= `${WIN_HOME_DIR}/.swt_secrets`), chmod 600. Three fields: `BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE`. |
 | Settings file `bitbucket` block | `enabled`, `flavor`, `auth.token_source`. Workspace moved to secrets file — it is user-specific account data, not project config. |
 | Initial ops scope | Read and write via `bb-curl` at user direction. Safety boundary is the agent hard rule (never see token, never construct headers, always go through the wrapper). |
-| Schema version | `_schema: 5`. v3 added the `bitbucket` block. v4 adds the `monitor` block (Monitor Mode polling, per-category policies, counter-response prompt). v5 adds the `review` block (Review Mode posting, per-finding rating threshold, comment polishing prompt). |
+| Schema version | `_schema: 6`. v3 added the `bitbucket` block. v4 adds the `monitor` block (Monitor Mode polling, per-category policies, counter-response prompt). v5 adds the `review` block (Review Mode posting, per-finding rating threshold, comment polishing prompt). v6 adds `support.script_language` (global investigative script language preference) and `support.app_overrides{}` (per-app script language overrides). |
 
 ---
 
@@ -26,8 +26,8 @@ This document is the reference for SWT's Bitbucket Cloud integration: a `bb-curl
 
 **Delivered artifacts:**
 - `scripts/bb-curl.sh` — REST wrapper, HTTP Basic auth, sources secrets locally, never echoes credentials.
-- `deploy.sh` — `_resolve_bitbucket_secrets` function, `--setup-bitbucket` interactive setup flow, schema migration v2→v3, schema migration v3→v4 (`monitor` block with defaults), schema migration v4→v5 (`review` block with defaults).
-- `swt_settings.json` schema bumped to v3 (`bitbucket` block added, disabled by default), then v4 (`monitor` block added with polling interval, per-category policies, and counter-response prompt), then v5 (`review` block added with Review Mode posting, per-finding rating threshold, and comment polishing prompt).
+- `deploy.sh` — `_resolve_bitbucket_secrets` function, `--setup-bitbucket` interactive setup flow, schema migration v2→v3, schema migration v3→v4 (`monitor` block with defaults), schema migration v4→v5 (`review` block with defaults), schema migration v5→v6 (`support.script_language` and `support.app_overrides{}` added to support block).
+- `swt_settings.json` schema bumped to v3 (`bitbucket` block added, disabled by default), then v4 (`monitor` block added with polling interval, per-category policies, and counter-response prompt), then v5 (`review` block added with Review Mode posting, per-finding rating threshold, and comment polishing prompt), then v6 (`support.script_language` global script language preference and `support.app_overrides{}` per-app override map added).
 - `${SWT_SECRETS_PATH}` template with `# === Bitbucket Cloud ===` header and 3 fields (`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `BITBUCKET_WORKSPACE`).
 - Hard rule "NEVER read or echo secrets" added to all agent definitions.
 - Full docs: `SETUP.md` Section 6, `CLAUDE.md` Bitbucket Integration section, `tpm-agent.md` Bitbucket Integration section, `README.md` features, schema row, and directory tree.
